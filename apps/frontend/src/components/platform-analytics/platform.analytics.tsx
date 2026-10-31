@@ -147,9 +147,9 @@ export const PlatformAnalytics = () => {
     return (
       <div className="bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all flex-1 justify-center items-center text-center">
         <div>
-          <img src="/peoplemarketplace.svg" />
+          <img src="/peoplemarketplace.svg" className="max-w-full" />
         </div>
-        <div className="text-[48px]">
+        <div className="text-[48px] mobile:text-[22px] mobile:leading-[1.3]">
           {t('can_t_show_analytics_yet', "Can't show analytics yet")}
           <br />
           {t(
@@ -171,15 +171,15 @@ export const PlatformAnalytics = () => {
     );
   }
   return (
-    <>
+    <div className="flex flex-1 gap-[1px] min-w-0 mobile:flex-col">
       <div
         className={clsx(
-          'bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all',
+          'bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all mobile:w-full mobile:p-[12px]',
           collapseMenu === '1' ? 'group sidebar w-[100px]' : 'w-[260px]'
         )}
       >
-        <div className="flex gap-[12px] flex-col">
-          <div className="flex items-center">
+        <div className="flex gap-[12px] flex-col mobile:flex-row mobile:overflow-x-auto mobile:gap-[10px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex items-center mobile:hidden">
             <h2 className="group-[.sidebar]:hidden flex-1 text-[20px] font-[500]">
               {t('channels')}
             </h2>
@@ -222,7 +222,7 @@ export const PlatformAnalytics = () => {
                 setCurrent(index);
               }}
               className={clsx(
-                'flex gap-[12px] items-center group/profile justify-center hover:bg-boxHover rounded-e-[8px]',
+                'flex gap-[12px] items-center group/profile justify-center hover:bg-boxHover rounded-e-[8px] mobile:shrink-0 mobile:rounded-[12px] mobile:p-[6px]',
                 currentIntegration.id !== integration.id &&
                   'opacity-20 hover:opacity-100 cursor-pointer'
               )}
@@ -241,7 +241,7 @@ export const PlatformAnalytics = () => {
                     <div className="bg-primary/60 w-[39px] h-[46px] start-0 top-0 absolute rounded-full z-[199]" />
                   </div>
                 )}
-                <div className="h-full w-[4px] -ms-[12px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity">
+                <div className="h-full w-[4px] -ms-[12px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity mobile:hidden">
                   <SVGLine />
                 </div>
                 <ImageWithFallback
@@ -262,7 +262,7 @@ export const PlatformAnalytics = () => {
               </div>
               <div
                 className={clsx(
-                  'flex-1 whitespace-nowrap text-ellipsis overflow-hidden group-[.sidebar]:hidden',
+                  'flex-1 whitespace-nowrap text-ellipsis overflow-hidden group-[.sidebar]:hidden mobile:hidden',
                   integration.disabled && 'opacity-50'
                 )}
               >
@@ -272,10 +272,13 @@ export const PlatformAnalytics = () => {
           ))}
         </div>
       </div>
-      <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px]">
+      <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px] min-w-0 mobile:p-[14px]">
         {!!options.length && (
           <div className="flex-1 flex flex-col gap-[14px]">
-            <div className="max-w-[200px]">
+            <div className="hidden mobile:block text-[18px] font-[600] truncate">
+              {currentIntegration?.name}
+            </div>
+            <div className="max-w-[200px] mobile:max-w-none">
               <Select
                 label=""
                 name="date"
@@ -298,6 +301,6 @@ export const PlatformAnalytics = () => {
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 };

@@ -816,3 +816,34 @@ html[dir='rtl'] [dir='ltr'] {
   text-shadow: -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black,
     1px 1px 0 black;
 }
+
+/* ---------------------------------------------------------------------------
+   Touch / mobile baseline (phones and tablets, keep in sync with the
+   `mobile` screen in tailwind.config.cjs)
+   ------------------------------------------------------------------------- */
+@media (max-width: 1025px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    -webkit-tap-highlight-color: transparent;
+    overflow-x: clip;
+  }
+
+  a,
+  button,
+  select,
+  summary,
+  label,
+  [role='button'] {
+    touch-action: manipulation;
+  }
+
+  /* iOS Safari zooms the page when a focused field has a font-size < 16px. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}

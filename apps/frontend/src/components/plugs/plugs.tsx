@@ -96,9 +96,9 @@ export const Plugs = () => {
     return (
       <div className="bg-newBgColorInner p-[20px] flex flex-1 flex-col gap-[15px] transition-all items-center justify-center">
         <div>
-          <img src="/peoplemarketplace.svg" />
+          <img src="/peoplemarketplace.svg" className="max-w-full" />
         </div>
-        <div className="text-[48px]">
+        <div className="text-[48px] mobile:text-[22px] mobile:leading-[1.3] mobile:text-center">
           {t(
             'there_are_not_plugs_matching_your_channels',
             'There are not plugs matching your channels'

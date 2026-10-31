@@ -6,6 +6,7 @@ import 'react-tooltip/dist/react-tooltip.css';
 import '@copilotkit/react-ui/styles.css';
 import LayoutContext from '@gitroom/frontend/components/layout/layout.context';
 import { ReactNode } from 'react';
+import type { Viewport } from 'next';
 import { Plus_Jakarta_Sans } from 'next/font/google';
 import PlausibleProvider from 'next-plausible';
 import clsx from 'clsx';
@@ -24,6 +25,14 @@ import {
 import { HtmlComponent } from '@gitroom/frontend/components/layout/html.component';
 import Script from 'next/script';
 import { ChangeDirClient } from '@gitroom/frontend/components/new-layout/change.dir.client';
+
+// viewport-fit=cover lets us use env(safe-area-inset-*) for the mobile tab bar
+// and bottom sheets on notched devices.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+};
 
 const jakartaSans = Plus_Jakarta_Sans({
   weight: ['600', '500'],

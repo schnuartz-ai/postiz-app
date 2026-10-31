@@ -63,7 +63,7 @@ export const NotificationOpenComponent = () => {
   return (
     <div
       id="notification-popup"
-      className="opacity-0 animate-normalFadeDown mt-[10px] absolute w-[420px] min-h-[200px] top-[100%] end-0 bg-third text-textColor rounded-[16px] flex flex-col border border-tableBorder z-[600]"
+      className="opacity-0 animate-normalFadeDown mt-[10px] absolute w-[420px] min-h-[200px] top-[100%] end-0 mobile:fixed mobile:w-auto mobile:inset-x-[12px] mobile:top-[60px] mobile:mt-0 bg-third text-textColor rounded-[16px] flex flex-col border border-tableBorder z-[600]"
     >
       <div
         className={`p-[16px] border-b border-tableBorder font-bold`}
@@ -71,7 +71,7 @@ export const NotificationOpenComponent = () => {
         {t('notifications', 'Notifications')}
       </div>
 
-      <div className="flex flex-col max-h-[400px] overflow-y-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
+      <div className="flex flex-col max-h-[400px] mobile:max-h-[65dvh] overflow-y-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
         {isLoading && (
           <div className="flex-1 flex justify-center pt-12">
             <ReactLoading type="spin" color="#fff" width={36} height={36} />

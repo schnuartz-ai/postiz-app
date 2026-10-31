@@ -94,7 +94,7 @@ export const hours = Array.from(
 );
 
 // Shared hook for post actions (edit, delete, statistics)
-const usePostActions = (onMutate?: () => void) => {
+export const usePostActions = (onMutate?: () => void) => {
   const t = useT();
   const fetch = useFetch();
   const modal = useModals();
@@ -260,6 +260,86 @@ const usePostActions = (onMutate?: () => void) => {
   return { editPost, deletePost, copyDebugJson, openStatistics, openMissingRelease };
 };
 
+/**
+ * Opens the "create post" composer (including the optional "pick a set" step).
+ * `getDate` is evaluated lazily, right before the composer opens.
+ */
+export const useCreatePost = () => {
+  const t = useT();
+  const modal = useModals();
+  const { integrations, reloadCalendarView, sets, signature } = useCalendar();
+
+  return useCallback(
+    async (getDate: () => dayjs.Dayjs) => {
+      const set: any = !sets.length
+        ? undefined
+        : await new Promise((resolve) => {
+            modal.openModal({
+              title: t('select_set', 'Select a Set'),
+              closeOnClickOutside: true,
+              askClose: false,
+              closeOnEscape: true,
+              withCloseButton: true,
+              onClose: () => resolve('exit'),
+              children: (
+                <SetSelectionModal
+                  sets={sets}
+                  onSelect={(selectedSet) => {
+                    resolve(selectedSet);
+                    modal.closeAll();
+                  }}
+                  onContinueWithoutSet={() => {
+                    resolve(undefined);
+                    modal.closeAll();
+                  }}
+                />
+              ),
+            });
+          });
+
+      if (set === 'exit') return;
+
+      modal.openModal({
+        id: 'add-edit-modal',
+        closeOnClickOutside: false,
+        removeLayout: true,
+        closeOnEscape: false,
+        withCloseButton: false,
+        askClose: true,
+        fullScreen: true,
+        classNames: {
+          modal: 'w-[100%] max-w-[1400px] text-textColor',
+        },
+        children: (
+          <AddEditModal
+            allIntegrations={integrations.map((p) => ({
+              ...p,
+            }))}
+            integrations={integrations.slice(0).map((p) => ({
+              ...p,
+            }))}
+            mutate={reloadCalendarView}
+            {...(signature?.id && !set
+              ? {
+                  onlyValues: [
+                    {
+                      content: '\n' + signature.content,
+                    },
+                  ],
+                }
+              : {})}
+            date={getDate()}
+            {...(set?.content ? { set: JSON.parse(set.content) } : {})}
+            reopenModal={() => ({})}
+          />
+        ),
+        size: '80%',
+      });
+    },
+    [integrations, sets, signature, reloadCalendarView, modal, t]
+  );
+};
+
 export const DayView = () => {
   const calendar = useCalendar();
   const { integrations, posts, startDate } = calendar;
@@ -306,7 +386,7 @@ export const DayView = () => {
 
   return (
     <div className="flex flex-col gap-[10px] flex-1 relative">
-      <div className="absolute start-0 top-0 w-full h-full flex flex-col overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
+      <div className="absolute start-0 top-0 w-full h-full flex flex-col overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor mobile:static mobile:h-auto mobile:overflow-visible">
         {options.map((option) => (
           <Fragment key={option[0].time}>
             <div className="text-center text-[14px] min-h-[21px]">
@@ -537,7 +617,7 @@ export const ListView = () => {
 
   return (
     <div className="flex flex-col gap-[10px] flex-1 relative">
-      <div className="absolute start-0 top-0 w-full h-full flex flex-col overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
+      <div className="absolute start-0 top-0 w-full h-full flex flex-col overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor mobile:static mobile:h-auto mobile:overflow-visible">
         {groupedPosts.map(([dateKey, datePosts]) => (
           <Fragment key={dateKey}>
             <div className="text-center text-[14px] min-h-[21px] text-textColor font-[500] mt-[10px]">
@@ -750,79 +830,19 @@ export const CalendarColumn: FC<{
     }),
   }), [posts]);
 
-  const addModal = useCallback(async () => {
-    const set: any = !sets.length
-      ? undefined
-      : await new Promise((resolve) => {
-          modal.openModal({
-            title: t('select_set', 'Select a Set'),
-            closeOnClickOutside: true,
-            askClose: false,
-            closeOnEscape: true,
-            withCloseButton: true,
-            onClose: () => resolve('exit'),
-            children: (
-              <SetSelectionModal
-                sets={sets}
-                onSelect={(selectedSet) => {
-                  resolve(selectedSet);
-                  modal.closeAll();
-                }}
-                onContinueWithoutSet={() => {
-                  resolve(undefined);
-                  modal.closeAll();
-                }}
-              />
-            ),
-          });
-        });
-
-    if (set === 'exit') return;
-
-    modal.openModal({
-      id: 'add-edit-modal',
-      closeOnClickOutside: false,
-      removeLayout: true,
-      closeOnEscape: false,
-      withCloseButton: false,
-      askClose: true,
-      fullScreen: true,
-      classNames: {
-        modal: 'w-[100%] max-w-[1400px] text-textColor',
-      },
-      children: (
-        <AddEditModal
-          allIntegrations={integrations.map((p) => ({
-            ...p,
-          }))}
-          integrations={integrations.slice(0).map((p) => ({
-            ...p,
-          }))}
-          mutate={reloadCalendarView}
-          {...(signature?.id && !set
-            ? {
-                onlyValues: [
-                  {
-                    content: '\n' + signature.content,
-                  },
-                ],
-              }
-            : {})}
-          date={
-            randomHour
-              ? getDate.hour(Math.floor(Math.random() * 24))
-              : getDate.format('YYYY-MM-DDTHH:mm:ss') ===
-                newDayjs().startOf('hour').format('YYYY-MM-DDTHH:mm:ss')
-              ? newDayjs().add(10, 'minute')
-              : getDate
-          }
-          {...(set?.content ? { set: JSON.parse(set.content) } : {})}
-          reopenModal={() => ({})}
-        />
+  const createPost = useCreatePost();
+  const addModal = useCallback(
+    () =>
+      createPost(() =>
+        randomHour
+          ? getDate.hour(Math.floor(Math.random() * 24))
+          : getDate.format('YYYY-MM-DDTHH:mm:ss') ===
+            newDayjs().startOf('hour').format('YYYY-MM-DDTHH:mm:ss')
+          ? newDayjs().add(10, 'minute')
+          : getDate
       ),
-      size: '80%',
-    });
-  }, [integrations, getDate, sets, signature]);
+    [createPost, getDate, randomHour]
+  );
 
   const addProvider = useAddProvider();
   return (
@@ -976,7 +996,7 @@ export const CalendarColumn: FC<{
     </div>
   );
 });
-const CalendarItem: FC<{
+export const CalendarItem: FC<{
   date: dayjs.Dayjs;
   isBeforeNow: boolean;
   editPost: () => void;
@@ -1066,7 +1086,9 @@ const CalendarItem: FC<{
       )}
       <div
         className={clsx(
-          'text-white text-[11px] max-h-[24px] h-[24px] min-h-[24px] w-full rounded-tr-[10px] rounded-tl-[10px] flex items-center justify-center gap-[10px] px-[5px] bg-btnPrimary'
+          'text-white text-[11px] max-h-[24px] h-[24px] min-h-[24px] w-full rounded-tr-[10px] rounded-tl-[10px] flex items-center justify-center gap-[10px] px-[5px] bg-btnPrimary',
+          // touch: no hover, so the actions stay visible and get a real tap size
+          'mobile:max-h-[40px] mobile:h-[40px] mobile:min-h-[40px] mobile:gap-[2px] mobile:px-[8px] mobile:text-[12px]'
         )}
         style={{
           backgroundColor: post?.tags?.[0]?.tag?.color,
@@ -1074,8 +1096,9 @@ const CalendarItem: FC<{
       >
         <div
           className={clsx(
-            post?.tags?.[0]?.tag?.color ? 'mix-blend-difference' : '',
-            'group-hover:hidden cursor-pointer'
+            post?.tags?.[0]?.tag?.color ? 'mix-blend-difference mobile:mix-blend-normal' : '',
+            'group-hover:hidden cursor-pointer',
+            'mobile:!block mobile:flex-1 mobile:truncate mobile:text-start'
           )}
         >
           {post.tags.map((p) => p.tag.name).join(', ')}
@@ -1083,8 +1106,8 @@ const CalendarItem: FC<{
         {copyDebugJson && (
           <div
             className={clsx(
-              'hidden group-hover:block hover:underline cursor-pointer',
-              post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
+              'hidden group-hover:block mobile:!flex mobile:items-center mobile:justify-center mobile:w-[36px] mobile:h-[36px] mobile:rounded-[8px] mobile:active:bg-white/20 hover:underline cursor-pointer',
+              post?.tags?.[0]?.tag?.color && 'mix-blend-difference mobile:mix-blend-normal'
             )}
             onClick={copyDebugJson}
           >
@@ -1093,8 +1116,8 @@ const CalendarItem: FC<{
         )}
         <div
           className={clsx(
-            'hidden group-hover:block hover:underline cursor-pointer',
-            post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
+            'hidden group-hover:block mobile:!flex mobile:items-center mobile:justify-center mobile:w-[36px] mobile:h-[36px] mobile:rounded-[8px] mobile:active:bg-white/20 hover:underline cursor-pointer',
+            post?.tags?.[0]?.tag?.color && 'mix-blend-difference mobile:mix-blend-normal'
           )}
           onClick={duplicatePost}
         >
@@ -1102,8 +1125,8 @@ const CalendarItem: FC<{
         </div>
         <div
           className={clsx(
-            'hidden group-hover:block hover:underline cursor-pointer',
-            post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
+            'hidden group-hover:block mobile:!flex mobile:items-center mobile:justify-center mobile:w-[36px] mobile:h-[36px] mobile:rounded-[8px] mobile:active:bg-white/20 hover:underline cursor-pointer',
+            post?.tags?.[0]?.tag?.color && 'mix-blend-difference mobile:mix-blend-normal'
           )}
           onClick={preview}
         >
@@ -1114,8 +1137,8 @@ const CalendarItem: FC<{
         ) : post.releaseId === 'missing' && missingRelease ? (
           <div
             className={clsx(
-              'hidden group-hover:block hover:underline cursor-pointer',
-              post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
+              'hidden group-hover:block mobile:!flex mobile:items-center mobile:justify-center mobile:w-[36px] mobile:h-[36px] mobile:rounded-[8px] mobile:active:bg-white/20 hover:underline cursor-pointer',
+              post?.tags?.[0]?.tag?.color && 'mix-blend-difference mobile:mix-blend-normal'
             )}
             onClick={missingRelease}
           >
@@ -1124,8 +1147,8 @@ const CalendarItem: FC<{
         ) : post.releaseId !== 'missing' ? (
           <div
             className={clsx(
-              'hidden group-hover:block hover:underline cursor-pointer',
-              post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
+              'hidden group-hover:block mobile:!flex mobile:items-center mobile:justify-center mobile:w-[36px] mobile:h-[36px] mobile:rounded-[8px] mobile:active:bg-white/20 hover:underline cursor-pointer',
+              post?.tags?.[0]?.tag?.color && 'mix-blend-difference mobile:mix-blend-normal'
             )}
             onClick={statistics}
           >
@@ -1136,8 +1159,8 @@ const CalendarItem: FC<{
         )}{' '}
         <div
           className={clsx(
-            'hidden group-hover:block hover:underline cursor-pointer',
-            post?.tags?.[0]?.tag?.color && 'mix-blend-difference'
+            'hidden group-hover:block mobile:!flex mobile:items-center mobile:justify-center mobile:w-[36px] mobile:h-[36px] mobile:rounded-[8px] mobile:active:bg-white/20 hover:underline cursor-pointer',
+            post?.tags?.[0]?.tag?.color && 'mix-blend-difference mobile:mix-blend-normal'
           )}
           onClick={deletePost}
         >
@@ -1147,27 +1170,27 @@ const CalendarItem: FC<{
       <div
         onClick={editPost}
         className={clsx(
-          'gap-[5px] w-full flex h-full flex-1 rounded-br-[10px] rounded-bl-[10px] p-[8px] text-[14px] bg-newColColor',
+          'gap-[5px] w-full flex h-full flex-1 rounded-br-[10px] rounded-bl-[10px] p-[8px] text-[14px] bg-newColColor mobile:p-[12px] mobile:gap-[10px]',
           'relative',
           isBeforeNow && '!grayscale'
         )}
       >
-        <div className={clsx('relative min-w-[20px]')}>
+        <div className={clsx('relative min-w-[20px] mobile:min-w-[28px]')}>
           <img
-            className="w-[20px] h-[20px] rounded-[8px]"
+            className="w-[20px] h-[20px] rounded-[8px] mobile:w-[28px] mobile:h-[28px]"
             src={post.integration.picture! || '/no-picture.jpg'}
           />
           <img
-            className="w-[12px] h-[12px] rounded-[8px] absolute z-10 top-[10px] end-0 border border-fifth"
+            className="w-[12px] h-[12px] rounded-[8px] absolute z-10 top-[10px] end-0 mobile:top-[18px] mobile:-end-[3px] border border-fifth"
             src={`/icons/platforms/${post.integration?.providerIdentifier}.png`}
           />
         </div>
-        <div className="w-full flex-1 flex flex-col min-h-[40px]">
+        <div className="w-full flex-1 flex flex-col min-h-[40px] mobile:min-h-[44px]">
           <div className="text-start">
             {state === 'DRAFT' ? t('draft', 'Draft') + ': ' : ''}
           </div>
             <div className="w-full relative">
-              <div className="absolute top-0 start-0 w-full text-ellipsis break-words line-clamp-1 text-start">
+              <div className="absolute top-0 start-0 w-full text-ellipsis break-words line-clamp-1 mobile:line-clamp-2 text-start">
                 {stripHtmlValidation('none', post.content, false, true, false) ||
                   t('no_content', 'no content')}
               </div>

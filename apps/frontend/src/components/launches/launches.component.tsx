@@ -26,6 +26,10 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import useCookie from 'react-use-cookie';
 import { Onboarding } from '@gitroom/frontend/components/onboarding/onboarding';
+import { BottomSheet } from '@gitroom/frontend/components/ui/bottom.sheet';
+import { useIsMobile } from '@gitroom/frontend/components/ui/use.media.query';
+import { MobileCalendar } from '@gitroom/frontend/components/launches/mobile.calendar';
+import { useCalendar } from '@gitroom/frontend/components/launches/calendar.context';
 
 export const SVGLine = () => {
   return (
@@ -349,6 +353,105 @@ export const MenuComponent: FC<
     </div>
   );
 };
+/**
+ * On phones the persistent channel sidebar is replaced by a compact avatar
+ * strip on top of the calendar. Tapping it opens the full channel list.
+ */
+const MobileChannelsBar: FC<{
+  integrations: any[];
+  onOpen: () => void;
+  update: () => void;
+}> = ({ integrations, onOpen, update }) => {
+  const t = useT();
+
+  if (!integrations.length) {
+    return (
+      <div className="flex flex-col gap-[12px] rounded-[16px] bg-newBgColor p-[16px]">
+        <div className="font-[600] text-[16px]">
+          {t('no_channels', 'No channels yet')}
+        </div>
+        <div className="text-[14px] text-textItemBlur">
+          {t('connect_your_accounts')}
+        </div>
+        <AddProviderButton update={update} />
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex items-center gap-[12px] rounded-[14px] bg-newBgColor ps-[10px] pe-[12px] py-[8px] text-start active:bg-boxHover"
+    >
+      <div className="flex-1 min-w-0 flex items-center gap-[8px] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {integrations.map((integration) => (
+          <div
+            key={integration.id}
+            className={clsx(
+              'relative shrink-0',
+              integration.disabled && 'opacity-40'
+            )}
+          >
+            <ImageWithFallback
+              fallbackSrc={'/no-picture.jpg'}
+              src={integration.picture || '/no-picture.jpg'}
+              className="rounded-full min-w-[36px] min-h-[36px] w-[36px] h-[36px] object-cover"
+              alt={integration.name}
+              width={36}
+              height={36}
+            />
+            {integration.identifier === 'youtube' ? (
+              <img
+                src="/icons/platforms/youtube.svg"
+                className="absolute z-10 -bottom-[3px] -end-[3px]"
+                width={16}
+              />
+            ) : (
+              <SafeImage
+                src={`/icons/platforms/${integration.identifier}.png`}
+                className="rounded-[5px] absolute z-10 -bottom-[3px] -end-[3px] border border-newBgColor"
+                alt={integration.identifier}
+                width={16}
+                height={16}
+              />
+            )}
+            {(integration.refreshNeeded || integration.inBetweenSteps) && (
+              <span className="absolute -top-[2px] -start-[2px] z-20 w-[12px] h-[12px] rounded-full bg-red-500 border-2 border-newBgColor" />
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="shrink-0 flex items-center gap-[4px] text-[13px] font-[600] text-textItemBlur">
+        {t('manage', 'Manage')}
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="rtl:rotate-180"
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+      </div>
+    </button>
+  );
+};
+
+/** Desktop keeps the full grid; phones get the week strip / month agenda. */
+const CalendarSwitch: FC = () => {
+  const isMobile = useIsMobile();
+  const { display } = useCalendar();
+  if (isMobile && (display === 'week' || display === 'month')) {
+    return <MobileCalendar />;
+  }
+  return <Calendar />;
+};
 export const LaunchesComponent = () => {
   const fetch = useFetch();
   const user = useUser();
@@ -360,6 +463,8 @@ export const LaunchesComponent = () => {
   const t = useT();
   const [reload, setReload] = useState(false);
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
+  const isMobile = useIsMobile();
+  const [channelsOpen, setChannelsOpen] = useState(false);
   const [mode] = useCookie('mode', 'dark');
   const { isLoading, data: integrations, mutate } = useIntegrationList();
 
@@ -499,7 +604,7 @@ export const LaunchesComponent = () => {
       <CalendarWeekProvider integrations={sortedIntegrations}>
         <div
           className={clsx(
-            'flex relative flex-col',
+            'flex relative flex-col mobile:hidden',
             collapseMenu === '1' ? 'group sidebar w-[100px]' : 'w-[260px]'
           )}
         >
@@ -592,12 +697,46 @@ export const LaunchesComponent = () => {
             </div>
           </div>
         </div>
-        <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px]">
+        <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px] min-w-0 mobile:p-[12px] mobile:pb-[92px] mobile:gap-[10px]">
+          {isMobile && (
+            <MobileChannelsBar
+              integrations={sortedIntegrations}
+              onOpen={() => setChannelsOpen(true)}
+              update={() => update(true)}
+            />
+          )}
           <Filters />
-          <div className="flex-1 flex">
-            <Calendar />
+          <div className="flex-1 flex min-w-0">
+            <CalendarSwitch />
           </div>
         </div>
+        {isMobile && sortedIntegrations?.length > 0 && <NewPost fab={true} />}
+        {isMobile && (
+          <BottomSheet
+            open={channelsOpen}
+            onClose={() => setChannelsOpen(false)}
+            title={t('channels', 'Channels')}
+          >
+            <div className="flex flex-col gap-[20px] pb-[8px]">
+              <AddProviderButton update={() => update(true)} />
+              <div className="gap-[28px] flex flex-col select-none">
+                {menuIntegrations.map((menu) => (
+                  <MenuGroupComponent
+                    collapsed={false}
+                    changeItemGroup={changeItemGroup}
+                    key={menu.name}
+                    group={menu}
+                    mutate={mutate}
+                    continueIntegration={continueIntegration}
+                    update={update}
+                    refreshChannel={refreshChannel}
+                    totalNonDisabledChannels={totalNonDisabledChannels}
+                  />
+                ))}
+              </div>
+            </div>
+          </BottomSheet>
+        )}
       </CalendarWeekProvider>
     </DNDProvider>
   );

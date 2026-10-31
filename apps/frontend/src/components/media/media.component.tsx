@@ -823,9 +823,9 @@ export const MultiMediaComponent: FC<{
             </ReactSortable>
           )}
         </div>
-        <div className="flex gap-[8px] px-[12px] border-t border-newColColor w-full b1 text-textColor">
+        <div className="flex gap-[8px] px-[12px] border-t border-newColColor w-full b1 text-textColor mobile:flex-wrap mobile:px-[8px]">
           {!mediaNotAvailable && (
-            <div className="flex py-[10px] b2 items-center gap-[4px]">
+            <div className="flex py-[10px] mobile:py-[6px] b2 items-center gap-[4px]">
               <div
                 onClick={showModal}
                 className="cursor-pointer h-[30px] rounded-[6px] justify-center items-center flex bg-newColColor px-[8px]"
@@ -864,17 +864,17 @@ export const MultiMediaComponent: FC<{
             </div>
           )}
           {!mediaNotAvailable && (
-            <div className="text-newColColor h-full flex items-center">
+            <div className="text-newColColor h-full flex items-center mobile:hidden">
               <VerticalDividerIcon />
             </div>
           )}
           {!!toolBar && (
-            <div className="flex py-[10px] b2 items-center gap-[4px]">
+            <div className="flex py-[10px] mobile:py-[6px] b2 items-center gap-[4px]">
               {toolBar}
             </div>
           )}
           {information && (
-            <div className="flex-1 justify-end flex py-[10px] b2 items-center gap-[4px]">
+            <div className="flex-1 justify-end flex py-[10px] mobile:py-[6px] b2 items-center gap-[4px]">
               {information}
             </div>
           )}

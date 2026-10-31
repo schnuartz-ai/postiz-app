@@ -40,7 +40,10 @@ export const SelectCustomer: FC<{
     }
 
     const { x, y, width, height } = ref.current?.getBoundingClientRect();
-    setPos({ top: y + height, left: x });
+    setPos({
+      top: y + height,
+      left: Math.max(8, Math.min(x, window.innerWidth - 258)),
+    });
     setOpen(true);
   }, [open]);
 

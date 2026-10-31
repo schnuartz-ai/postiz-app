@@ -311,71 +311,64 @@ export const useMenuItem = () => {
   };
 };
 
-export const TopMenu: FC = () => {
+export const useVisibleMenu = () => {
   const user = useUser();
   const { firstMenu, secondMenu } = useMenuItem();
   const { isGeneral, billingEnabled } = useVariables();
+
+  const isVisible = (f: MenuItemInterface) => {
+    if (f.hide) {
+      return false;
+    }
+    if (f.requireBilling && !billingEnabled) {
+      return false;
+    }
+    if (f.name === 'Billing' && user?.isLifetime) {
+      return false;
+    }
+    if (f.role) {
+      return f.role.includes(user?.role!);
+    }
+    return true;
+  };
+
+  const showFirstMenu =
+    // @ts-ignore
+    !!user?.orgId &&
+    // @ts-ignore
+    (user.tier !== 'FREE' || !isGeneral || !billingEnabled);
+
+  return {
+    first: showFirstMenu ? firstMenu.filter(isVisible) : [],
+    second: secondMenu.filter(isVisible),
+  };
+};
+
+export const TopMenu: FC = () => {
+  const { first, second } = useVisibleMenu();
   return (
     <>
       <div className="flex flex-1 flex-col minCustom:gap-[16px] blurMe">
-        {
-          // @ts-ignore
-          user?.orgId &&
-            // @ts-ignore
-            (user.tier !== 'FREE' || !isGeneral || !billingEnabled) &&
-            firstMenu
-              .filter((f) => {
-                if (f.hide) {
-                  return false;
-                }
-                if (f.requireBilling && !billingEnabled) {
-                  return false;
-                }
-                if (f.name === 'Billing' && user?.isLifetime) {
-                  return false;
-                }
-                if (f.role) {
-                  return f.role.includes(user?.role!);
-                }
-                return true;
-              })
-              .map((item, index) => (
-                <MenuItem
-                  path={item.path}
-                  label={item.name}
-                  icon={item.icon}
-                  key={item.name}
-                  onClick={item.onClick}
-                />
-              ))
-        }
+        {first.map((item) => (
+          <MenuItem
+            path={item.path}
+            label={item.name}
+            icon={item.icon}
+            key={item.name}
+            onClick={item.onClick}
+          />
+        ))}
       </div>
       <div className="flex flex-col minCustom:gap-[20px] custom:gap-[8px] blurMe">
-        {secondMenu
-          .filter((f) => {
-            if (f.hide) {
-              return false;
-            }
-            if (f.requireBilling && !billingEnabled) {
-              return false;
-            }
-            if (f.name === 'Billing' && user?.isLifetime) {
-              return false;
-            }
-            if (f.role) {
-              return f.role.includes(user?.role!);
-            }
-            return true;
-          })
-          .map((item, index) => (
-            <MenuItem
-              path={item.path}
-              label={item.name}
-              icon={item.icon}
-              key={item.name}
-              onClick={item.onClick}
-            />
-          ))}
+        {second.map((item) => (
+          <MenuItem
+            path={item.path}
+            label={item.name}
+            icon={item.icon}
+            key={item.name}
+            onClick={item.onClick}
+          />
+        ))}
       </div>
     </>
   );

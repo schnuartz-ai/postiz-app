@@ -53,6 +53,8 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   const toaster = useToaster();
   const modal = useModals();
   const [showSettings, setShowSettings] = useState(false);
+  // On phones the editor and the preview share the screen via tabs.
+  const [mobileTab, setMobileTab] = useState<'edit' | 'preview'>('edit');
   const { data: shortlinkPreferenceData } = useShortlinkPreference();
 
   const { addEditSets, mutate, customClose, dummy } = props;
@@ -437,11 +439,58 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
   );
 
   return (
-    <div className="w-full h-full flex-1 p-[40px] flex relative">
-      <div className="flex flex-1 bg-newBgColorInner rounded-[20px] flex-col">
-        <div className="flex-1 flex">
-          <div className="flex flex-col flex-1 border-e border-newBorder">
-            <div className="bg-newBgColor h-[65px] rounded-s-[20px] !rounded-b-[0] flex items-center gap-[12px] px-[20px] text-[20px] font-[600]">
+    <div className="w-full h-full flex-1 p-[40px] mobile:p-0 flex relative">
+      <style>
+        {`@media (max-width: 1025px) { .copilotKitButton { display: none !important; } }`}
+      </style>
+      <div className="flex flex-1 min-w-0 bg-newBgColorInner rounded-[20px] mobile:rounded-none flex-col">
+        <div className="hidden mobile:flex items-center gap-[8px] ps-[4px] pe-[12px] pt-[env(safe-area-inset-top)] bg-newBgColor border-b border-newBorder">
+          <button
+            type="button"
+            onClick={askClose}
+            aria-label={t('close', 'Close')}
+            className="w-[48px] h-[56px] flex items-center justify-center text-[#A3A3A3] active:text-newTextColor"
+          >
+            <CloseIcon />
+          </button>
+          <div className="flex-1 min-w-0 flex items-center gap-[8px] text-[17px] font-[600]">
+            <span className="truncate">
+              {t('create_post_title', 'Create Post')}
+            </span>
+            <CreationMethodBadge
+              creationMethod={existingData?.posts?.[0]?.creationMethod}
+              size="sm"
+            />
+          </div>
+          <div className="flex p-[3px] rounded-[10px] bg-newBgLineColor text-[13px] font-[600]">
+            {(['edit', 'preview'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setMobileTab(tab)}
+                aria-pressed={mobileTab === tab}
+                className={clsx(
+                  'h-[32px] px-[12px] rounded-[8px] transition-colors',
+                  mobileTab === tab
+                    ? 'bg-boxFocused text-textItemFocused'
+                    : 'text-textItemBlur'
+                )}
+              >
+                {tab === 'edit'
+                  ? t('edit', 'Edit')
+                  : t('preview', 'Preview')}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex-1 flex min-h-0">
+          <div
+            className={clsx(
+              'flex flex-col flex-1 min-w-0 border-e border-newBorder',
+              mobileTab !== 'edit' && 'mobile:hidden'
+            )}
+          >
+            <div className="bg-newBgColor h-[65px] rounded-s-[20px] !rounded-b-[0] flex items-center gap-[12px] px-[20px] text-[20px] font-[600] mobile:hidden">
               {t('create_post_title', 'Create Post')}
               <CreationMethodBadge
                 creationMethod={existingData?.posts?.[0]?.creationMethod}
@@ -454,7 +503,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               >
                 <div
                   id="social-content"
-                  className="gap-[32px] flex flex-col pe-[8px] pt-[20px] ps-[20px] absolute top-0 left-0 w-full h-full overflow-x-hidden overflow-y-scroll scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner"
+                  className="gap-[32px] flex flex-col pe-[8px] pt-[20px] ps-[20px] mobile:gap-[20px] mobile:pe-[14px] mobile:ps-[14px] mobile:pt-[14px] absolute top-0 left-0 w-full h-full overflow-x-hidden overflow-y-scroll scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner"
                 >
                   <div className="flex w-full">
                     <div className="flex flex-1">
@@ -487,7 +536,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <div
                 id="wrapper-settings"
                 className={clsx(
-                  'pb-[20px] px-[20px] select-none',
+                  'pb-[20px] px-[20px] mobile:pb-[10px] mobile:px-[12px] select-none',
                   showSettings && 'flex-1 flex pt-[20px]',
                   current === 'global' && 'hidden'
                 )}
@@ -530,8 +579,13 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               </div>
             </div>
           </div>
-          <div className="w-[580px] flex flex-col">
-            <div className="bg-newBgColor h-[65px] rounded-e-[20px] !rounded-b-[0] flex items-center px-[20px] text-[20px] font-[600]">
+          <div
+            className={clsx(
+              'w-[580px] mobile:w-full mobile:flex-1 min-w-0 flex flex-col',
+              mobileTab !== 'preview' && 'mobile:hidden'
+            )}
+          >
+            <div className="bg-newBgColor h-[65px] rounded-e-[20px] !rounded-b-[0] flex items-center px-[20px] text-[20px] font-[600] mobile:hidden">
               <div className="flex-1">{t('post_preview', 'Post Preview')}</div>
               <div className="cursor-pointer">
                 <CloseIcon onClick={askClose} className="text-[#A3A3A3]" />
@@ -540,15 +594,15 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
             <div className="flex-1 relative">
               <Scrollable
                 scrollClasses="!pe-[20px]"
-                className="absolute top-0 p-[20px] pe-[8px] left-0 w-full h-full overflow-x-hidden overflow-y-scroll scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner"
+                className="absolute top-0 p-[20px] pe-[8px] mobile:p-[12px] left-0 w-full h-full overflow-x-hidden overflow-y-scroll scrollbar scrollbar-thumb-newColColor scrollbar-track-newBgColorInner"
               >
                 <ShowAllProviders ref={ref} />
               </Scrollable>
             </div>
           </div>
         </div>
-        <div className="select-none h-[84px] py-[20px] border-t border-newBorder flex items-center">
-          <div className="flex-1 flex ps-[20px] gap-[8px]">
+        <div className="select-none h-[84px] py-[20px] border-t border-newBorder flex items-center mobile:h-auto mobile:flex-col mobile:items-stretch mobile:gap-[10px] mobile:px-[12px] mobile:pt-[12px] mobile:pb-[max(12px,env(safe-area-inset-bottom))]">
+          <div className="flex-1 flex ps-[20px] gap-[8px] mobile:flex-none mobile:ps-0 mobile:w-full">
             {!dummy && (
               <TagsComponent
                 name="tags"
@@ -564,11 +618,11 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               <RepeatComponent repeat={repeater} onChange={setRepeater} />
             )}
           </div>
-          <div className="pe-[20px] flex items-center justify-end gap-[8px]">
+          <div className="pe-[20px] flex items-center justify-end gap-[8px] mobile:pe-0 mobile:grid mobile:grid-cols-6 mobile:gap-[8px] mobile:w-full">
             {existingData?.integration && (
               <button
                 onClick={deletePost}
-                className="cursor-pointer flex text-[#FF3F3F] gap-[8px] items-center text-[15px] font-[600]"
+                className="cursor-pointer flex text-[#FF3F3F] gap-[8px] items-center text-[15px] font-[600] mobile:order-5 mobile:col-span-3 mobile:justify-center mobile:h-[44px] mobile:border mobile:border-[#FF3F3F]/30 mobile:rounded-[8px]"
               >
                 <div>
                   <TrashIcon />
@@ -576,14 +630,18 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 <div>{t('delete_post', 'Delete Post')}</div>
               </button>
             )}
-            <DatePicker onChange={setDate} date={date} />
+            <DatePicker
+              onChange={setDate}
+              date={date}
+              className="mobile:order-1 mobile:col-span-6 mobile:ml-0"
+            />
             {!addEditSets && (
               <button
                 disabled={
                   selectedIntegrations.length === 0 || loading || locked
                 }
                 onClick={schedule('draft')}
-                className="relative cursor-pointer disabled:cursor-not-allowed px-[20px] h-[44px] bg-btnSimple justify-center items-center flex rounded-[8px] text-[15px] font-[600]"
+                className="relative cursor-pointer disabled:cursor-not-allowed px-[20px] h-[44px] bg-btnSimple justify-center items-center flex rounded-[8px] text-[15px] font-[600] mobile:order-2 mobile:col-span-2 mobile:px-[8px] mobile:min-w-0"
               >
                 {loading && (
                   <div className="absolute left-[50%] top-[50%] -translate-y-[50%] -translate-x-[50%]">
@@ -606,14 +664,29 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                 Save Set
               </button>
             )}
+            {!addEditSets && !dummy && (
+              <button
+                type="button"
+                onClick={schedule('now')}
+                disabled={
+                  selectedIntegrations.length === 0 || loading || locked
+                }
+                className={clsx(
+                  'hidden mobile:flex mobile:order-4 h-[44px] rounded-[8px] bg-[#D82D7E] text-white text-[15px] font-[600] items-center justify-center disabled:opacity-60 active:opacity-80',
+                  existingData?.integration ? 'col-span-3' : 'col-span-6'
+                )}
+              >
+                {t('post_now', 'Post Now')}
+              </button>
+            )}
             {!addEditSets && (
-              <div className="group cursor-pointer relative">
+              <div className="group cursor-pointer relative mobile:order-3 mobile:col-span-4 mobile:min-w-0">
                 <button
                   disabled={
                     selectedIntegrations.length === 0 || loading || locked
                   }
                   onClick={schedule('schedule')}
-                  className="text-white relative min-w-[180px] btnSub disabled:cursor-not-allowed disabled:opacity-80 outline-none gap-[8px] flex justify-center items-center h-[44px] rounded-[8px] bg-[#612BD3] ps-[20px] pe-[16px]"
+                  className="text-white relative min-w-[180px] mobile:min-w-0 mobile:w-full btnSub disabled:cursor-not-allowed disabled:opacity-80 outline-none gap-[8px] flex justify-center items-center h-[44px] rounded-[8px] bg-[#612BD3] ps-[20px] pe-[16px] mobile:px-[12px]"
                 >
                   {loading && (
                     <div className="absolute left-[50%] top-[50%] -translate-y-[50%] -translate-x-[50%]">
@@ -637,7 +710,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                       : t('update', 'Update')}
                   </div>
                   {!dummy && (
-                    <div className="flex justify-center items-center h-[20px] w-[20px] pt-[4px] arrow-change">
+                    <div className="flex justify-center items-center h-[20px] w-[20px] pt-[4px] arrow-change mobile:hidden">
                       <DropdownArrowSmallIcon className="group-hover:rotate-180 text-white" />
                     </div>
                   )}
@@ -649,7 +722,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
                     disabled={
                       selectedIntegrations.length === 0 || loading || locked
                     }
-                    className="rounded-[8px] z-[300] disabled:cursor-not-allowed disabled:opacity-80 hidden group-hover:flex absolute bottom-[100%] -left-[12px] p-[12px] w-[206px] bg-newBgColorInner"
+                    className="rounded-[8px] z-[300] disabled:cursor-not-allowed disabled:opacity-80 hidden group-hover:flex mobile:!hidden absolute bottom-[100%] -left-[12px] p-[12px] w-[206px] bg-newBgColorInner"
                   >
                     <div className="text-white rounded-[8px] bg-[#D82D7E] h-[44px] w-full flex justify-center items-center post-now">
                       {t('post_now', 'Post Now')}

@@ -116,21 +116,22 @@ export const SettingsPopup: FC<{
   }, []);
 
   return (
-    <>
-      <div className="bg-newBgColorInner p-[20px] flex flex-col transition-all w-[260px]">
-        <div className="flex flex-1 flex-col gap-[15px]">
+    <div className="flex flex-1 gap-[1px] min-w-0 mobile:flex-col">
+      <div className="bg-newBgColorInner p-[20px] flex flex-col transition-all w-[260px] mobile:w-full mobile:p-[12px] mobile:flex-row mobile:items-center mobile:gap-[8px] mobile:overflow-x-auto mobile:sticky mobile:top-[56px] mobile:z-[80] mobile:border-b mobile:border-newBorder [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex flex-1 flex-col gap-[15px] mobile:flex-none mobile:flex-row mobile:gap-[8px]">
           {list.map(({ tab: tabKey, label }) => (
             <div
               key={tabKey}
               className={clsx(
-                'cursor-pointer flex items-center gap-[12px] group/profile hover:bg-boxHover rounded-e-[8px]',
-                tabKey === tab && 'bg-boxHover'
+                'cursor-pointer flex items-center gap-[12px] group/profile hover:bg-boxHover rounded-e-[8px] mobile:rounded-full mobile:px-[16px] mobile:min-h-[40px] mobile:whitespace-nowrap mobile:bg-newBgLineColor mobile:text-[14px] mobile:font-[600]',
+                tabKey === tab &&
+                  'bg-boxHover mobile:!bg-boxFocused mobile:text-textItemFocused'
               )}
               onClick={() => setTab(tabKey)}
             >
               <div
                 className={clsx(
-                  'h-full w-[4px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity',
+                  'h-full w-[4px] rounded-s-[3px] opacity-0 group-hover/profile:opacity-100 transition-opacity mobile:hidden',
                   tabKey === tab && 'opacity-100'
                 )}
               >
@@ -142,13 +143,13 @@ export const SettingsPopup: FC<{
         </div>
         <div>
           {showLogout && (
-            <div className="mt-4">
+            <div className="mt-4 mobile:mt-0 mobile:shrink-0">
               <LogoutComponent />
             </div>
           )}
         </div>
       </div>
-      <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px]">
+      <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px] min-w-0 mobile:p-[14px]">
         <FormProvider {...form}>
           <form onSubmit={form.handleSubmit(submit)}>
             {!!getRef && (
@@ -213,7 +214,7 @@ export const SettingsPopup: FC<{
           </form>
         </FormProvider>
       </div>
-    </>
+    </div>
   );
 };
 export const SettingsComponent = () => {

@@ -1,12 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { FC, useCallback, useEffect, useState } from 'react';
+import clsx from 'clsx';
 import useCookie from 'react-use-cookie';
 import EventEmitter from 'events';
 
 export const modeEmitter = new EventEmitter();
 
-const ModeComponent = () => {
+const ModeComponent: FC<{ className?: string; label?: string }> = ({
+  className,
+  label,
+}) => {
   const [mode, setMode] = useCookie('mode', 'dark');
 
   const changeMode = useCallback(() => {
@@ -19,7 +23,11 @@ const ModeComponent = () => {
     document.body.classList.add(mode);
   }, [mode]);
   return (
-    <div onClick={changeMode} className="select-none cursor-pointer">
+    <div
+      onClick={changeMode}
+      className={clsx('select-none cursor-pointer', className)}
+    >
+      {label && <div className="flex-1">{label}</div>}
       {mode === 'dark' ? (
         <svg
           xmlns="http://www.w3.org/2000/svg"

@@ -5,28 +5,23 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import clsx from 'clsx';
-export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
-  asOpenSelect,
-}) => {
+const useOrganizations = () => {
   const fetch = useFetch();
-  const user = useUser();
   const load = useCallback(async () => {
     return await (await fetch('/user/organizations')).json();
   }, []);
-  const { isLoading, data } = useSWR('organizations', load, {
+  return useSWR('organizations', load, {
     revalidateIfStale: false,
     revalidateOnFocus: false,
     refreshWhenOffline: false,
     refreshWhenHidden: false,
     revalidateOnReconnect: false,
   });
-  const current = useMemo(() => {
-    return data?.find((d: any) => d.id === user?.orgId);
-  }, [data]);
-  const withoutCurrent = useMemo(() => {
-    return data?.filter((d: any) => d.id !== user?.orgId);
-  }, [current, data]);
-  const changeOrg = useCallback(
+};
+
+const useChangeOrganization = () => {
+  const fetch = useFetch();
+  return useCallback(
     (org: { name: string; id: string }) => async () => {
       await fetch('/user/change-org', {
         method: 'POST',
@@ -38,6 +33,68 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
     },
     []
   );
+};
+
+/**
+ * Touch-friendly organization switcher (the desktop one opens on hover).
+ * Renders nothing when the user only belongs to a single organization.
+ */
+export const OrganizationList: FC = () => {
+  const user = useUser();
+  const { isLoading, data } = useOrganizations();
+  const changeOrg = useChangeOrganization();
+  if (isLoading || !data || data.length <= 1) {
+    return null;
+  }
+  return (
+    <div className="flex flex-col gap-[8px]">
+      <div className="text-[13px] font-[600] text-textItemBlur px-[4px]">
+        Organization
+      </div>
+      <div className="rounded-[16px] bg-newBgColor overflow-hidden">
+        {data.map((org: { name: string; id: string }) => (
+          <button
+            key={org.id}
+            type="button"
+            onClick={org.id === user?.orgId ? undefined : changeOrg(org)}
+            className="w-full min-h-[52px] px-[16px] flex items-center gap-[12px] text-start text-[15px] font-[500] border-t border-newBorder first:border-t-0 active:bg-boxHover"
+          >
+            <span className="flex-1 truncate">{org.name}</span>
+            {org.id === user?.orgId && (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-newTableTextFocused"
+              >
+                <path d="M5 12.5l4.5 4.5L19 7.5" />
+              </svg>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
+  asOpenSelect,
+}) => {
+  const user = useUser();
+  const { isLoading, data } = useOrganizations();
+  const current = useMemo(() => {
+    return data?.find((d: any) => d.id === user?.orgId);
+  }, [data]);
+  const withoutCurrent = useMemo(() => {
+    return data?.filter((d: any) => d.id !== user?.orgId);
+  }, [current, data]);
+  const changeOrg = useChangeOrganization();
   if (isLoading || (!isLoading && data?.length === 1)) {
     return null;
   }
