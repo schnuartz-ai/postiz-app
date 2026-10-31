@@ -375,4 +375,99 @@ describe('NostrProvider', () => {
       expect(verifyEvent(repost)).toBe(true);
     });
   });
+
+  describe('auto repost after X likes', () => {
+    const noteSk = Uint8Array.from(Array(32).fill(9));
+    const note = finalizeEvent(
+      { kind: 1, created_at: 100, tags: [], content: 'my note' },
+      noteSk
+    );
+    // the channel that owns the plug is the author of the note
+    const channel = { token, internalId: note.pubkey } as any;
+    const fields = { likesAmount: '3' };
+
+    const reaction = (
+      seed: number,
+      content = '+',
+      tags: string[][] = [['e', note.id]]
+    ) =>
+      finalizeEvent(
+        { kind: 7, created_at: 200, tags, content },
+        Uint8Array.from(Array(32).fill(seed))
+      );
+
+    const mockRelays = (reactions: Event[], existingReposts: Event[] = []) => {
+      jest
+        .spyOn(SimplePool.prototype, 'querySync')
+        .mockImplementation((async (_relays: string[], filter: any) =>
+          filter.kinds?.includes(7) ? reactions : existingReposts) as any);
+      jest
+        .spyOn(SimplePool.prototype, 'get')
+        .mockImplementation((async (_relays: string[], filter: any) =>
+          filter.ids ? note : null) as any);
+    };
+
+    it('is registered as a plug with a likes threshold', () => {
+      const plugs = Reflect.getMetadata('custom:plug', NostrProvider.prototype);
+      expect(plugs).toEqual([
+        expect.objectContaining({
+          identifier: 'nostr-autoRepostPost',
+          methodName: 'autoRepostPost',
+          fields: [expect.objectContaining({ name: 'likesAmount' })],
+        }),
+      ]);
+    });
+
+    it('waits for the next run while there are not enough likes', async () => {
+      mockRelays([reaction(1), reaction(2)]);
+
+      expect(await provider.autoRepostPost(channel, note.id, fields)).toBe(
+        false
+      );
+      expect(published).toHaveLength(0);
+    });
+
+    it('published once the threshold is reached', async () => {
+      mockRelays([reaction(1), reaction(2, '🔥'), reaction(3, '')]);
+
+      expect(await provider.autoRepostPost(channel, note.id, fields)).toBe(
+        true
+      );
+      expect(published).toHaveLength(1);
+      expect(published[0].kind).toBe(6);
+      expect(published[0].tags[0]).toEqual(['e', note.id, expect.any(String)]);
+      expect(verifyEvent(published[0])).toBe(true);
+    });
+
+    it('only counts real likes from other accounts', async () => {
+      mockRelays([
+        reaction(1),
+        reaction(1), // same account twice
+        reaction(2, '-'), // dislike
+        reaction(3, '+', [['e', 'f'.repeat(64)]]), // reaction to another note
+        finalizeEvent(
+          { kind: 7, created_at: 200, tags: [['e', note.id]], content: '+' },
+          noteSk // like by the author itself
+        ),
+      ]);
+
+      expect(await provider.autoRepostPost(channel, note.id, fields)).toBe(
+        false
+      );
+      expect(published).toHaveLength(0);
+    });
+
+    it('does not repost twice when a run is retried', async () => {
+      const mine = finalizeEvent(
+        { kind: 6, created_at: 300, tags: [['e', note.id]], content: '' },
+        noteSk
+      );
+      mockRelays([reaction(1), reaction(2), reaction(3)], [mine]);
+
+      expect(await provider.autoRepostPost(channel, note.id, fields)).toBe(
+        true
+      );
+      expect(published).toHaveLength(0);
+    });
+  });
 });

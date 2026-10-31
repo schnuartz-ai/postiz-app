@@ -22,6 +22,7 @@ import WebSocket from 'ws';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { Integration } from '@prisma/client';
 import { PostPlug } from '@gitroom/helpers/decorators/post.plug';
+import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
 import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
@@ -549,8 +550,6 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     postId: string,
     information: any
   ) {
-    const secretKey = this.getSecretKey(integration.token);
-
     // the original note was just published, give the relays a moment
     const lookupRelays = Array.from(
       new Set([
@@ -559,14 +558,113 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
       ])
     );
 
-    let original: NostrEvent | null = null;
-    for (let attempt = 0; attempt < 3 && !original; attempt++) {
-      original = await pool.get(
-        lookupRelays,
-        { ids: [postId] },
+    await this.repostNote(integration, postId, lookupRelays, 3);
+  }
+
+  @Plug({
+    identifier: 'nostr-autoRepostPost',
+    title: 'Auto Repost Posts',
+    description:
+      'When a post reached a certain number of likes, repost it to increase engagement (checked every 6 hours, 3 times)',
+    runEveryMilliseconds: 21600000,
+    totalRuns: 3,
+    fields: [
+      {
+        name: 'likesAmount',
+        type: 'number',
+        placeholder: 'Amount of likes',
+        description: 'The amount of likes to trigger the repost',
+        validation: /^\d+$/,
+      },
+    ],
+  })
+  async autoRepostPost(
+    integration: Integration,
+    id: string,
+    fields: { likesAmount: string }
+  ) {
+    const relays = await this.getPublishRelays(integration.internalId);
+    const needed = Math.max(1, Number(fields?.likesAmount) || 1);
+
+    if ((await this.countLikes(id, integration.internalId, relays)) < needed) {
+      // try again on the next run
+      return false;
+    }
+
+    // a retried run must never repost twice
+    if (!(await this.alreadyReposted(id, integration.internalId, relays))) {
+      await this.repostNote(integration, id, relays, 1);
+    }
+
+    return true;
+  }
+
+  /**
+   * Distinct accounts that liked the note (NIP-25). Dislikes ("-"), likes by
+   * the author and reactions that point to another note are ignored. Reactions
+   * are spread over many relays, so this is a lower bound.
+   */
+  private async countLikes(
+    eventId: string,
+    author: string,
+    relays: string[]
+  ): Promise<number> {
+    const reactions = await pool.querySync(
+      relays,
+      { kinds: [7], '#e': [eventId], limit: 1000 },
+      { maxWait: 8000 }
+    );
+
+    const likers = new Set<string>();
+    for (const reaction of reactions) {
+      if (reaction.pubkey === author || reaction.content === '-') {
+        continue;
+      }
+
+      // NIP-25: the last e tag is the note that was reacted to
+      const reactedTo = [...reaction.tags].reverse().find((t) => t[0] === 'e');
+      if (reactedTo?.[1] === eventId) {
+        likers.add(reaction.pubkey);
+      }
+    }
+
+    return likers.size;
+  }
+
+  private async alreadyReposted(
+    eventId: string,
+    pubkey: string,
+    relays: string[]
+  ): Promise<boolean> {
+    try {
+      const existing = await pool.querySync(
+        relays,
+        { kinds: [6, 16], authors: [pubkey], '#e': [eventId], limit: 1 },
         { maxWait: 5000 }
       );
-      if (!original) {
+      return existing.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Looks the note up on the relays and publishes a NIP-18 repost for the channel. */
+  private async repostNote(
+    integration: Integration,
+    eventId: string,
+    lookupRelays: string[],
+    attempts: number
+  ) {
+    const secretKey = this.getSecretKey(integration.token);
+
+    let original: NostrEvent | null = null;
+    for (let attempt = 0; attempt < attempts && !original; attempt++) {
+      original = await pool.get(
+        lookupRelays,
+        { ids: [eventId] },
+        { maxWait: 5000 }
+      );
+      if (!original && attempt < attempts - 1) {
         await new Promise((res) => setTimeout(res, 2000));
       }
     }
