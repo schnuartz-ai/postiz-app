@@ -1,6 +1,6 @@
-import React, { FC, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
-import dayjs from 'dayjs';
+import { fromUtc } from '@gitroom/frontend/components/layout/set.timezone';
 import { useCalendar } from '@gitroom/frontend/components/launches/calendar.context';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -8,7 +8,7 @@ import { SetSelectionModal } from '@gitroom/frontend/components/launches/calenda
 import { AddEditModal } from '@gitroom/frontend/components/new-launch/add.edit.modal';
 import { ModalWrapperComponent } from '@gitroom/frontend/components/new-launch/modal.wrapper.component';
 
-export const NewPost: FC<{ fab?: boolean }> = ({ fab }) => {
+export const NewPost = () => {
   const fetch = useFetch();
   const modal = useModals();
   const { integrations, reloadCalendarView, sets } = useCalendar();
@@ -67,37 +67,13 @@ export const NewPost: FC<{ fab?: boolean }> = ({ fab }) => {
           reopenModal={createAPost}
           mutate={reloadCalendarView}
           integrations={integrations}
-          date={dayjs.utc(date).local()}
+          date={fromUtc(date)}
         />
       ),
       size: '80%',
       title: ``,
     });
   }, [integrations, sets]);
-  if (fab) {
-    return (
-      <button
-        type="button"
-        onClick={createAPost}
-        aria-label={t('create_new_post', 'Create Post')}
-        className="fixed z-[95] end-[16px] bottom-[calc(68px+env(safe-area-inset-bottom)+16px)] w-[56px] h-[56px] rounded-full bg-btnPrimary text-white hidden mobile:flex items-center justify-center shadow-[0_8px_24px_rgba(97,43,211,0.45)] active:scale-95 transition-transform outline-none blurMe"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="26"
-          height="26"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-        >
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-      </button>
-    );
-  }
-
   return (
     <button
       onClick={createAPost}

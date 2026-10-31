@@ -136,7 +136,6 @@ module.exports = {
         newMessages: 'newMessages 1s ease-in-out 4s forwards',
         marqueeUp: 'marquee-up 100s linear infinite',
         marqueeDown: 'marquee-down 100s linear infinite',
-        sheetUp: 'sheetUp 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards',
       },
       boxShadow: {
         yellow: '0 0 60px 20px #6b6237',
@@ -154,14 +153,6 @@ module.exports = {
       },
       // that is actual animation
       keyframes: (theme) => ({
-        sheetUp: {
-          '0%': {
-            transform: 'translateY(100%)',
-          },
-          '100%': {
-            transform: 'translateY(0)',
-          },
-        },
         fadeOut: {
           '0%': {
             opacity: 0,

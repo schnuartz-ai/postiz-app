@@ -52,6 +52,7 @@ const getList = (t: (key: string, fallback: string) => string) => [
 export const RepeatComponent: FC<{
   repeat: number | null;
   onChange: (newVal: number) => void;
+  list?: boolean;
 }> = (props) => {
   const { repeat } = props;
   const t = useT();
@@ -72,22 +73,58 @@ export const RepeatComponent: FC<{
     return list.find((p) => p.value === repeat)?.label;
   }, [repeat, list]);
 
+  if (props.list) {
+    // the radio list starts with "do not repeat", the dropdown ends with cancel
+    const options = [
+      ...list.filter((p) => !p.value),
+      ...list.filter((p) => p.value),
+    ];
+    return (
+      <div className="flex flex-col gap-[8px]">
+        {options.map((p) => {
+          const selected = p.value ? repeat === p.value : !repeat;
+          return (
+            <div
+              onClick={() => props.onChange(Number(p.value))}
+              key={p.label}
+              className="min-h-[48px] px-[12px] flex items-center justify-between gap-[12px] cursor-pointer select-none"
+            >
+              <div className="text-[14px] font-[400]">
+                {p.value ? p.label : t('do_not_repeat', 'Do Not Repeat')}
+              </div>
+              <div
+                className={clsx(
+                  'w-[24px] h-[24px] rounded-full border-[1.5px] flex justify-center items-center',
+                  selected ? 'border-[#FC69FF]' : 'border-newTextColor/20'
+                )}
+              >
+                {selected && (
+                  <div className="w-[12px] h-[12px] rounded-full bg-[#FC69FF]" />
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={ref}
       className={clsx(
-        'border rounded-[8px] justify-center flex items-center relative h-[44px] text-[15px] font-[600] select-none mobile:flex-1 mobile:min-w-0',
+        'border rounded-[8px] justify-center flex items-center relative h-[44px] text-[15px] font-[600] select-none',
         isOpen ? 'border-[#612BD3]' : 'border-newTextColor/10',
       )}
     >
       <div
         onClick={() => setIsOpen(!isOpen)}
-        className="px-[16px] mobile:px-[12px] justify-center flex gap-[8px] items-center h-full select-none flex-1 min-w-0"
+        className="px-[16px] justify-center flex gap-[8px] items-center h-full select-none flex-1"
       >
         <div className="cursor-pointer">
           <RepeatIcon />
         </div>
-        <div className="cursor-pointer mobile:min-w-0 mobile:truncate">
+        <div className="cursor-pointer">
           {repeat
             ? `${t('repeat_post_every_label', 'Repeat Post Every')} ${everyLabel}`
             : t('repeat_post_every', 'Repeat Post Every...')}
@@ -97,7 +134,7 @@ export const RepeatComponent: FC<{
         </div>
       </div>
       {isOpen && (
-        <div className="z-[300] absolute start-0 mobile:start-auto mobile:end-0 bottom-[100%] w-[240px] bg-newBgColorInner p-[12px] menu-shadow -translate-y-[10px] flex flex-col">
+        <div className="z-[300] absolute start-0 bottom-[100%] w-[240px] bg-newBgColorInner p-[12px] menu-shadow -translate-y-[10px] flex flex-col">
           {list.map((p) => (
             <div
               onClick={() => {

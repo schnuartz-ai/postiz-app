@@ -1,6 +1,9 @@
 'use client';
 
-import { AddProviderButton } from '@gitroom/frontend/components/launches/add.provider.component';
+import {
+  AddProviderButton,
+  CustomVariables,
+} from '@gitroom/frontend/components/launches/add.provider.component';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import SafeImage from '@gitroom/react/helpers/safe.image';
 import { capitalize, groupBy, orderBy } from 'lodash';
@@ -26,10 +29,11 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useIntegrationList } from '@gitroom/frontend/components/launches/helpers/use.integration.list';
 import useCookie from 'react-use-cookie';
 import { Onboarding } from '@gitroom/frontend/components/onboarding/onboarding';
-import { BottomSheet } from '@gitroom/frontend/components/ui/bottom.sheet';
-import { useIsMobile } from '@gitroom/frontend/components/ui/use.media.query';
-import { MobileCalendar } from '@gitroom/frontend/components/launches/mobile.calendar';
-import { useCalendar } from '@gitroom/frontend/components/launches/calendar.context';
+import { ChannelsAfterPayment } from '@gitroom/frontend/components/layout/check.payment';
+import { HubspotInstalled } from '@gitroom/frontend/components/launches/hubspot.installed';
+import { useModals } from '@gitroom/frontend/components/layout/new-modal';
+import { Input } from '@gitroom/react/form/input';
+import { Button } from '@gitroom/react/form/button';
 
 export const SVGLine = () => {
   return (
@@ -111,6 +115,70 @@ export const OpenClose: FC<{
     </svg>
   );
 };
+const EditGroupNameModal: FC<{
+  name: string;
+  id: string;
+  close: () => void;
+  resolve: (value: string) => void;
+}> = (props) => {
+  const t = useT();
+  const { close, name, id, resolve } = props;
+  const fetch = useFetch();
+  const toaster = useToaster();
+  const [groupName, setGroupName] = useState<string>(name);
+  const save = useCallback(async () => {
+    const response = await fetch(`/integrations/customers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: groupName }),
+    });
+    if (!response.ok) {
+      const { message } = await response.json().catch(() => ({} as any));
+      toaster.show(
+        (Array.isArray(message) ? message[0] : message) ||
+          t('could_not_save_group', 'Could not save the group.'),
+        'warning'
+      );
+      return;
+    }
+    resolve(groupName);
+    close();
+  }, [groupName, id]);
+  return (
+    <div>
+      <Input
+        name="name"
+        disableForm={true}
+        label={t('group_name', 'Name')}
+        value={groupName}
+        onChange={(e) => setGroupName(e.target.value)}
+      />
+      <Button onClick={save} className="mt-[16px]">
+        {t('save', 'Save')}
+      </Button>
+    </div>
+  );
+};
+
+const EditPencil = () => {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <path
+        d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+};
+
 export const MenuGroupComponent: FC<
   MenuComponentInterface & {
     changeItemGroup: (id: string, group: string) => void;
@@ -137,8 +205,36 @@ export const MenuGroupComponent: FC<
     changeItemGroup,
     collapsed,
   } = props;
+  const t = useT();
+  const modals = useModals();
+  const toaster = useToaster();
   const [isOpen, setIsOpen] = useState(
     !!+(localStorage.getItem(group.name + '_isOpen') || '1')
+  );
+  const editGroupName = useCallback(
+    async (e: any) => {
+      e.stopPropagation();
+      const val: string | undefined = await new Promise((resolve) => {
+        modals.openModal({
+          title: t('edit_group_name', 'Edit group name'),
+          onClose: () => resolve(undefined),
+          children: (close) => (
+            <EditGroupNameModal
+              name={group.name}
+              id={group.id}
+              close={close}
+              resolve={resolve}
+            />
+          ),
+        });
+      });
+      if (!val) {
+        return;
+      }
+      await mutate();
+      toaster.show(t('group_updated', 'Group Updated'), 'success');
+    },
+    [group.name, group.id, mutate, modals, t]
   );
   const changeOpenClose = useCallback(
     (e: any) => {
@@ -177,7 +273,7 @@ export const MenuGroupComponent: FC<
       )}
       {!!group.name && (
         <div
-          className="flex items-center gap-[5px] cursor-pointer"
+          className="flex items-center gap-[5px] cursor-pointer group"
           onClick={changeOpenClose}
         >
           <div>
@@ -194,6 +290,14 @@ export const MenuGroupComponent: FC<
           >
             {group.name}
           </div>
+          {!collapsed && (
+            <div
+              className="hidden group-hover:block hover:opacity-70"
+              onClick={editGroupName}
+            >
+              <EditPencil />
+            </div>
+          )}
         </div>
       )}
       <div
@@ -353,105 +457,6 @@ export const MenuComponent: FC<
     </div>
   );
 };
-/**
- * On phones the persistent channel sidebar is replaced by a compact avatar
- * strip on top of the calendar. Tapping it opens the full channel list.
- */
-const MobileChannelsBar: FC<{
-  integrations: any[];
-  onOpen: () => void;
-  update: () => void;
-}> = ({ integrations, onOpen, update }) => {
-  const t = useT();
-
-  if (!integrations.length) {
-    return (
-      <div className="flex flex-col gap-[12px] rounded-[16px] bg-newBgColor p-[16px]">
-        <div className="font-[600] text-[16px]">
-          {t('no_channels', 'No channels yet')}
-        </div>
-        <div className="text-[14px] text-textItemBlur">
-          {t('connect_your_accounts')}
-        </div>
-        <AddProviderButton update={update} />
-      </div>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="flex items-center gap-[12px] rounded-[14px] bg-newBgColor ps-[10px] pe-[12px] py-[8px] text-start active:bg-boxHover"
-    >
-      <div className="flex-1 min-w-0 flex items-center gap-[8px] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {integrations.map((integration) => (
-          <div
-            key={integration.id}
-            className={clsx(
-              'relative shrink-0',
-              integration.disabled && 'opacity-40'
-            )}
-          >
-            <ImageWithFallback
-              fallbackSrc={'/no-picture.jpg'}
-              src={integration.picture || '/no-picture.jpg'}
-              className="rounded-full min-w-[36px] min-h-[36px] w-[36px] h-[36px] object-cover"
-              alt={integration.name}
-              width={36}
-              height={36}
-            />
-            {integration.identifier === 'youtube' ? (
-              <img
-                src="/icons/platforms/youtube.svg"
-                className="absolute z-10 -bottom-[3px] -end-[3px]"
-                width={16}
-              />
-            ) : (
-              <SafeImage
-                src={`/icons/platforms/${integration.identifier}.png`}
-                className="rounded-[5px] absolute z-10 -bottom-[3px] -end-[3px] border border-newBgColor"
-                alt={integration.identifier}
-                width={16}
-                height={16}
-              />
-            )}
-            {(integration.refreshNeeded || integration.inBetweenSteps) && (
-              <span className="absolute -top-[2px] -start-[2px] z-20 w-[12px] h-[12px] rounded-full bg-red-500 border-2 border-newBgColor" />
-            )}
-          </div>
-        ))}
-      </div>
-      <div className="shrink-0 flex items-center gap-[4px] text-[13px] font-[600] text-textItemBlur">
-        {t('manage', 'Manage')}
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="rtl:rotate-180"
-        >
-          <path d="M9 6l6 6-6 6" />
-        </svg>
-      </div>
-    </button>
-  );
-};
-
-/** Desktop keeps the full grid; phones get the week strip / month agenda. */
-const CalendarSwitch: FC = () => {
-  const isMobile = useIsMobile();
-  const { display } = useCalendar();
-  if (isMobile && (display === 'week' || display === 'month')) {
-    return <MobileCalendar />;
-  }
-  return <Calendar />;
-};
 export const LaunchesComponent = () => {
   const fetch = useFetch();
   const user = useUser();
@@ -461,9 +466,9 @@ export const LaunchesComponent = () => {
   const toast = useToaster();
   const fireEvents = useFireEvents();
   const t = useT();
+  const modal = useModals();
   const [reload, setReload] = useState(false);
   const [collapseMenu, setCollapseMenu] = useCookie('collapseMenu', '0');
-  const isMobile = useIsMobile();
   const [channelsOpen, setChannelsOpen] = useState(false);
   const [mode] = useCookie('mode', 'dark');
   const { isLoading, data: integrations, mutate } = useIntegrationList();
@@ -546,9 +551,31 @@ export const LaunchesComponent = () => {
     (
         integration: Integration & {
           identifier: string;
+          isCustomFields?: boolean;
+          customFields?: any[];
         }
       ) =>
       async () => {
+        // Custom-fields providers (Bluesky, etc.) have no OAuth URL to redirect
+        // to: reconnect by re-entering the credentials, like the menu does.
+        if (integration.isCustomFields) {
+          modal.openModal({
+            title: t('custom_url', 'Custom URL'),
+            withCloseButton: false,
+            classNames: {
+              modal: 'md',
+            },
+            children: (
+              <CustomVariables
+                identifier={integration.identifier}
+                gotoUrl={(url: string) => router.push(url)}
+                variables={integration.customFields || []}
+              />
+            ),
+          });
+          return;
+        }
+
         const { url } = await (
           await fetch(
             `/integrations/social/${integration.identifier}?refresh=${integration.internalId}`,
@@ -601,16 +628,29 @@ export const LaunchesComponent = () => {
   return (
     <DNDProvider>
       <Onboarding />
+      <ChannelsAfterPayment integrations={integrations} />
+      <HubspotInstalled />
       <CalendarWeekProvider integrations={sortedIntegrations}>
+        {channelsOpen && (
+          <div
+            className="hidden mobile:block fixed inset-0 bg-newBackdrop opacity-60 z-[149]"
+            onClick={() => setChannelsOpen(false)}
+          />
+        )}
         <div
           className={clsx(
-            'flex relative flex-col mobile:hidden',
-            collapseMenu === '1' ? 'group sidebar w-[100px]' : 'w-[260px]'
+            'flex relative flex-col',
+            collapseMenu === '1' && !channelsOpen
+              ? 'group sidebar w-[100px]'
+              : 'w-[260px]',
+            channelsOpen
+              ? 'mobile:fixed mobile:inset-x-0 mobile:bottom-0 mobile:z-[150] mobile:w-full mobile:max-h-[80vh] mobile:rounded-t-[16px] mobile:overflow-hidden'
+              : 'mobile:hidden'
           )}
         >
           <div
             className={clsx(
-              'bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all absolute start-0 top-0 w-full h-full overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor'
+              'bg-newBgColorInner p-[20px] flex flex-col gap-[15px] transition-all absolute start-0 top-0 w-full h-full mobile:static mobile:h-auto mobile:max-h-[80vh] mobile:pb-[80px] overflow-x-hidden overflow-y-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor'
             )}
           >
             <div className="flex items-center">
@@ -618,10 +658,29 @@ export const LaunchesComponent = () => {
                 {t('channels')}
               </h2>
               <div
+                onClick={() => setChannelsOpen(false)}
+                className="hidden mobile:flex text-btnText bg-btnSimple rounded-[6px] w-[28px] h-[28px] items-center justify-center cursor-pointer select-none"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                >
+                  <path
+                    d="M1 1L11 11M11 1L1 11"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+              <div
                 onClick={() =>
                   setCollapseMenu(collapseMenu === '1' ? '0' : '1')
                 }
-                className="group-[.sidebar]:rotate-[180deg] group-[.sidebar]:mx-auto text-btnText bg-btnSimple rounded-[6px] w-[24px] h-[24px] flex items-center justify-center cursor-pointer select-none"
+                className="group-[.sidebar]:rotate-[180deg] group-[.sidebar]:mx-auto mobile:hidden text-btnText bg-btnSimple rounded-[6px] w-[24px] h-[24px] flex items-center justify-center cursor-pointer select-none"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -642,7 +701,7 @@ export const LaunchesComponent = () => {
             </div>
             <div className="flex flex-col gap-[8px] group-[.sidebar]:mx-auto group-[.sidebar]:w-[44px]">
               <AddProviderButton update={() => update(true)} />
-              <div className="flex gap-[8px] group-[.sidebar]:flex-col">
+              <div className="flex gap-[8px] group-[.sidebar]:flex-col mobile:hidden">
                 {sortedIntegrations?.length > 0 && <NewPost />}
                 {sortedIntegrations?.length > 0 &&
                   user?.tier?.ai &&
@@ -650,30 +709,31 @@ export const LaunchesComponent = () => {
               </div>
             </div>
             <div className="gap-[32px] flex flex-col select-none flex-1">
-              {sortedIntegrations.length === 0 && collapseMenu === '0' && (
-                <div className="flex-1 max-h-[500px] justify-center items-center flex">
-                  <div className="flex flex-col gap-[12px] text-center">
-                    <img
-                      src={
-                        mode === 'dark'
-                          ? '/no-channels.svg'
-                          : '/no-channels-colors.svg'
-                      }
-                      alt="No channels"
-                      className="mx-auto min-w-[100%]"
-                    />
-                    <div className="font-[600] text-[20px]">
-                      {t('no_channels', 'No channels yet')}
-                    </div>
-                    <div className="text-[14px]">
-                      {t('connect_your_accounts')}
+              {sortedIntegrations.length === 0 &&
+                (collapseMenu === '0' || channelsOpen) && (
+                  <div className="flex-1 max-h-[500px] justify-center items-center flex">
+                    <div className="flex flex-col gap-[12px] text-center">
+                      <img
+                        src={
+                          mode === 'dark'
+                            ? '/no-channels.svg'
+                            : '/no-channels-colors.svg'
+                        }
+                        alt="No channels"
+                        className="mx-auto min-w-[100%]"
+                      />
+                      <div className="font-[600] text-[20px]">
+                        {t('no_channels', 'No channels yet')}
+                      </div>
+                      <div className="text-[14px]">
+                        {t('connect_your_accounts')}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
               {menuIntegrations.map((menu) => (
                 <MenuGroupComponent
-                  collapsed={collapseMenu === '1'}
+                  collapsed={collapseMenu === '1' && !channelsOpen}
                   changeItemGroup={changeItemGroup}
                   key={menu.name}
                   group={menu}
@@ -685,7 +745,7 @@ export const LaunchesComponent = () => {
                 />
               ))}
             </div>
-            <div className="mt-[5px] text-center flex flex-col">
+            <div className="mt-[5px] text-center flex flex-col mobile:hidden">
               {billingEnabled && user?.isLifetime && (
                 <div>{capitalize(user?.tier?.current || '')} tier</div>
               )}
@@ -697,46 +757,45 @@ export const LaunchesComponent = () => {
             </div>
           </div>
         </div>
-        <div className="bg-newBgColorInner flex-1 flex-col flex p-[20px] gap-[12px] min-w-0 mobile:p-[12px] mobile:pb-[92px] mobile:gap-[10px]">
-          {isMobile && (
-            <MobileChannelsBar
-              integrations={sortedIntegrations}
-              onOpen={() => setChannelsOpen(true)}
-              update={() => update(true)}
-            />
-          )}
-          <Filters />
-          <div className="flex-1 flex min-w-0">
-            <CalendarSwitch />
-          </div>
-        </div>
-        {isMobile && sortedIntegrations?.length > 0 && <NewPost fab={true} />}
-        {isMobile && (
-          <BottomSheet
-            open={channelsOpen}
-            onClose={() => setChannelsOpen(false)}
-            title={t('channels', 'Channels')}
-          >
-            <div className="flex flex-col gap-[20px] pb-[8px]">
-              <AddProviderButton update={() => update(true)} />
-              <div className="gap-[28px] flex flex-col select-none">
-                {menuIntegrations.map((menu) => (
-                  <MenuGroupComponent
-                    collapsed={false}
-                    changeItemGroup={changeItemGroup}
-                    key={menu.name}
-                    group={menu}
-                    mutate={mutate}
-                    continueIntegration={continueIntegration}
-                    update={update}
-                    refreshChannel={refreshChannel}
-                    totalNonDisabledChannels={totalNonDisabledChannels}
+        <div className="bg-newBgColorInner flex-1 min-w-0 flex-col flex p-[20px] mobile:p-[12px] gap-[12px] mobile:min-h-[600px]">
+          <div className="hidden mobile:flex gap-[8px]">
+            <div
+              onClick={() => setChannelsOpen(true)}
+              className="cursor-pointer h-[44px] px-[12px] bg-btnSimple text-btnText rounded-[8px] flex items-center gap-[8px] select-none"
+            >
+              <div className="flex -space-x-[10px] rtl:space-x-reverse">
+                {sortedIntegrations.slice(0, 3).map((integration: any) => (
+                  <ImageWithFallback
+                    key={integration.id}
+                    fallbackSrc={`/icons/platforms/${integration.identifier}.png`}
+                    src={integration.picture}
+                    className="rounded-full border-2 border-btnSimple"
+                    alt={integration.identifier}
+                    width={24}
+                    height={24}
                   />
                 ))}
               </div>
+              <div className="text-[14px] font-[500]">
+                {sortedIntegrations.length || t('channels')}
+              </div>
             </div>
-          </BottomSheet>
-        )}
+            {sortedIntegrations?.length > 0 ? (
+              <>
+                <NewPost />
+                {user?.tier?.ai && billingEnabled && <GeneratorComponent />}
+              </>
+            ) : (
+              <div className="flex-1">
+                <AddProviderButton update={() => update(true)} />
+              </div>
+            )}
+          </div>
+          <Filters />
+          <div className="flex-1 flex">
+            <Calendar />
+          </div>
+        </div>
       </CalendarWeekProvider>
     </DNDProvider>
   );

@@ -5,23 +5,28 @@ import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { useUser } from '@gitroom/frontend/components/layout/user.context';
 import clsx from 'clsx';
-const useOrganizations = () => {
+export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
+  asOpenSelect,
+}) => {
   const fetch = useFetch();
+  const user = useUser();
   const load = useCallback(async () => {
     return await (await fetch('/user/organizations')).json();
   }, []);
-  return useSWR('organizations', load, {
+  const { isLoading, data } = useSWR('organizations', load, {
     revalidateIfStale: false,
     revalidateOnFocus: false,
     refreshWhenOffline: false,
     refreshWhenHidden: false,
     revalidateOnReconnect: false,
   });
-};
-
-const useChangeOrganization = () => {
-  const fetch = useFetch();
-  return useCallback(
+  const current = useMemo(() => {
+    return data?.find((d: any) => d.id === user?.orgId);
+  }, [data]);
+  const withoutCurrent = useMemo(() => {
+    return data?.filter((d: any) => d.id !== user?.orgId);
+  }, [current, data]);
+  const changeOrg = useCallback(
     (org: { name: string; id: string }) => async () => {
       await fetch('/user/change-org', {
         method: 'POST',
@@ -33,68 +38,6 @@ const useChangeOrganization = () => {
     },
     []
   );
-};
-
-/**
- * Touch-friendly organization switcher (the desktop one opens on hover).
- * Renders nothing when the user only belongs to a single organization.
- */
-export const OrganizationList: FC = () => {
-  const user = useUser();
-  const { isLoading, data } = useOrganizations();
-  const changeOrg = useChangeOrganization();
-  if (isLoading || !data || data.length <= 1) {
-    return null;
-  }
-  return (
-    <div className="flex flex-col gap-[8px]">
-      <div className="text-[13px] font-[600] text-textItemBlur px-[4px]">
-        Organization
-      </div>
-      <div className="rounded-[16px] bg-newBgColor overflow-hidden">
-        {data.map((org: { name: string; id: string }) => (
-          <button
-            key={org.id}
-            type="button"
-            onClick={org.id === user?.orgId ? undefined : changeOrg(org)}
-            className="w-full min-h-[52px] px-[16px] flex items-center gap-[12px] text-start text-[15px] font-[500] border-t border-newBorder first:border-t-0 active:bg-boxHover"
-          >
-            <span className="flex-1 truncate">{org.name}</span>
-            {org.id === user?.orgId && (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-newTableTextFocused"
-              >
-                <path d="M5 12.5l4.5 4.5L19 7.5" />
-              </svg>
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
-  asOpenSelect,
-}) => {
-  const user = useUser();
-  const { isLoading, data } = useOrganizations();
-  const current = useMemo(() => {
-    return data?.find((d: any) => d.id === user?.orgId);
-  }, [data]);
-  const withoutCurrent = useMemo(() => {
-    return data?.filter((d: any) => d.id !== user?.orgId);
-  }, [current, data]);
-  const changeOrg = useChangeOrganization();
   if (isLoading || (!isLoading && data?.length === 1)) {
     return null;
   }
@@ -106,7 +49,7 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
             <div className="bg-btnPrimary !flex !relative max-w-[500px] mx-auto py-[12px] px-[12px]">Select Organization</div>
           )}
           {!asOpenSelect && (
-            <div className="flex items-center">
+            <div className="flex items-center gap-[6px]">
               <svg
                 className={user?.tier.current === 'FREE' ? 'animate-bounce drop-shadow-glow': ''}
                 width="24"
@@ -120,25 +63,50 @@ export const OrganizationSelector: FC<{ asOpenSelect?: boolean }> = ({
                   fill="currentColor"
                 />
               </svg>
+              {!!current?.name && (
+                <div className="max-w-[240px] truncate mobile:hidden">{current?.name}</div>
+              )}
             </div>
           )}
           {data?.length > 1 && (
             <div
               className={clsx(
-                'hidden py-[12px] px-[12px] group-hover:flex absolute top-[100%] end-0 bg-third border-tableBorder border gap-[12px] cursor-pointer flex-col',
+                'hidden py-[12px] px-[12px] group-hover:flex absolute top-[100%] end-0 w-max max-w-[400px] bg-third border-tableBorder border gap-[12px] cursor-pointer flex-col',
                 asOpenSelect ? '!flex !relative max-w-[500px] mx-auto mb-[10px]' : '',
               )}
             >
-              {data?.map((org: { name: string; id: string }) => (
-                <div key={org.id} onClick={changeOrg(org)}>
-                  {org.name}
-                </div>
-              ))}
+              {withoutCurrent?.map(
+                (org: {
+                  name: string;
+                  id: string;
+                  users: { role: 'SUPERADMIN' | 'ADMIN' | 'USER' }[];
+                }) => (
+                  <div
+                    key={org?.id}
+                    onClick={changeOrg(org)}
+                    className="whitespace-nowrap truncate"
+                  >
+                    {org?.name}
+                    {!!org?.users?.[0]?.role && (
+                      <span className="text-customColor18">
+                        {' '}
+                        (
+                        {org?.users?.[0]?.role === 'SUPERADMIN'
+                          ? 'Super-Admin'
+                          : org?.users?.[0]?.role === 'ADMIN'
+                          ? 'Admin'
+                          : 'User'}
+                        )
+                      </span>
+                    )}
+                  </div>
+                )
+              )}
             </div>
           )}
         </div>
       </div>
-      {!asOpenSelect && <div className="w-[1px] h-[20px] bg-blockSeparator" />}
+      {!asOpenSelect && <div className="w-[1px] h-[20px] bg-blockSeparator mobile:hidden" />}
     </>
   );
 };
