@@ -332,6 +332,229 @@ describe('NostrProvider', () => {
     });
   });
 
+  describe('Blossom servers, backups and channel settings', () => {
+    const PNG = Buffer.from(
+      '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489',
+      'hex'
+    );
+    const realFetch = global.fetch;
+    const PRIMAL = 'https://blossom.primal.net';
+    const BACKUP = 'https://blossom.einundzwanzig.space';
+    const OTHER = 'https://files.example.org';
+    // [method, url] of every request to a Blossom server
+    let calls: string[];
+    // overrides per "METHOD https://host/path" -> status
+    let status: Record<string, number>;
+
+    const channel = (settings: object) =>
+      ({
+        internalId: PK,
+        token,
+        customInstanceDetails: AuthService.fixedEncryption(
+          JSON.stringify({ password: SK_HEX, ...settings })
+        ),
+      } as any);
+
+    const pic = [{ type: 'image' as const, path: 'https://my.server/a.png' }];
+    const post = (integration: any) =>
+      provider.post(
+        PK,
+        token,
+        [{ id: 'db-id', message: 'pic', settings: {}, media: pic }],
+        integration
+      );
+
+    beforeEach(() => {
+      process.env.NOSTR_BLOSSOM_DISABLED = 'false';
+      calls = [];
+      status = {};
+      mockReadOrFetch.mockResolvedValue(PNG);
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      global.fetch = jest.fn(async (url: any, init: any) => {
+        const key = `${init.method} ${url}`;
+        calls.push(key);
+        const forced = status[key];
+        if (forced && forced >= 400) {
+          return new Response('', { status: forced });
+        }
+        const sha256 = init.headers['X-SHA-256'] || 'a'.repeat(64);
+        return new Response(
+          JSON.stringify({
+            url: `${new URL(String(url)).origin}/${sha256}.png`,
+            sha256,
+            size: PNG.length,
+            type: 'image/png',
+          }),
+          { status: 200 }
+        );
+      }) as any;
+    });
+
+    afterEach(() => {
+      process.env.NOSTR_BLOSSOM_DISABLED = 'true';
+      global.fetch = realFetch;
+    });
+
+    it('uploads to the first server and mirrors to the others (BUD-04)', async () => {
+      await post(channel({ blossomServers: [PRIMAL, BACKUP, OTHER] }));
+
+      expect(calls).toEqual([
+        `PUT ${PRIMAL}/upload`,
+        `PUT ${BACKUP}/mirror`,
+        `PUT ${OTHER}/mirror`,
+      ]);
+      // the note links to the primary server
+      expect(published[0].content).toMatch(
+        /^pic\n\nhttps:\/\/blossom\.primal\.net\/[0-9a-f]{64}\.png$/
+      );
+    });
+
+    it('sends the file when a backup server cannot mirror', async () => {
+      status[`PUT ${BACKUP}/mirror`] = 404;
+
+      await post(channel({ blossomServers: [PRIMAL, BACKUP] }));
+
+      expect(calls).toEqual([
+        `PUT ${PRIMAL}/upload`,
+        `PUT ${BACKUP}/mirror`,
+        `PUT ${BACKUP}/upload`,
+      ]);
+    });
+
+    it('does not retry a backup that refuses the key', async () => {
+      status[`PUT ${BACKUP}/mirror`] = 403;
+
+      await post(channel({ blossomServers: [PRIMAL, BACKUP] }));
+
+      expect(calls).toEqual([`PUT ${PRIMAL}/upload`, `PUT ${BACKUP}/mirror`]);
+    });
+
+    it('links to the next server when the primary is down', async () => {
+      status[`PUT ${PRIMAL}/upload`] = 500;
+
+      const [res] = await post(channel({ blossomServers: [PRIMAL, BACKUP] }));
+
+      expect(res.status).toBe('completed');
+      expect(published[0].content).toContain(
+        'https://blossom.einundzwanzig.space/'
+      );
+      // the broken primary is not asked again for a backup
+      expect(calls).toEqual([`PUT ${PRIMAL}/upload`, `PUT ${BACKUP}/upload`]);
+    });
+
+    it('only mirrors when the file already lives on the primary', async () => {
+      const sha = 'c'.repeat(64);
+      await provider.post(
+        PK,
+        token,
+        [
+          {
+            id: 'db-id',
+            message: 'pic',
+            settings: {},
+            media: [{ type: 'image' as const, path: `${PRIMAL}/${sha}.png` }],
+          },
+        ],
+        channel({ blossomServers: [PRIMAL, BACKUP] })
+      );
+
+      expect(calls).toEqual([`PUT ${BACKUP}/mirror`]);
+      expect(published[0].content).toBe(`pic\n\n${PRIMAL}/${sha}.png`);
+    });
+
+    it('keeps own-server links when the channel has no Blossom server', async () => {
+      await post(channel({ blossomServers: [] }));
+
+      expect(calls).toEqual([]);
+      expect(published[0].content).toBe('pic\n\nhttps://my.server/a.png');
+    });
+
+    it('still understands channels saved with the old single server', async () => {
+      await post(channel({ blossom: BACKUP }));
+
+      expect(calls).toEqual([`PUT ${BACKUP}/upload`]);
+    });
+
+    it('publishes to the extra relays of the channel', async () => {
+      const publish = jest.spyOn(SimplePool.prototype, 'publish');
+
+      await post(channel({ relays: ['wss://relay.example.org'] }));
+
+      expect(publish.mock.calls[0][0]).toContain('wss://relay.example.org');
+      expect(publish.mock.calls[0][0]).toContain('wss://relay.primal.net');
+    });
+
+    it('tests a server with the BUD-06 pre-check', async () => {
+      const accepted = await provider.testBlossomServer(
+        token,
+        { server: BACKUP },
+        PK,
+        {} as any
+      );
+      expect(accepted).toMatchObject({ server: BACKUP, state: 'accepted' });
+      expect(calls).toEqual([`HEAD ${BACKUP}/upload`]);
+
+      status[`HEAD ${OTHER}/upload`] = 403;
+      expect(
+        await provider.testBlossomServer(
+          token,
+          { server: OTHER },
+          PK,
+          {} as any
+        )
+      ).toMatchObject({ state: 'rejected', status: 403 });
+
+      status[`HEAD ${PRIMAL}/upload`] = 404;
+      expect(
+        await provider.testBlossomServer(
+          token,
+          { server: PRIMAL },
+          PK,
+          {} as any
+        )
+      ).toMatchObject({ state: 'unknown' });
+
+      expect(
+        await provider.testBlossomServer(
+          token,
+          { server: 'http://x' },
+          PK,
+          {} as any
+        )
+      ).toMatchObject({ state: 'unreachable' });
+    });
+
+    it('publishes the server list as kind 10063 (BUD-03), in order', async () => {
+      const result = await provider.publishBlossomServerList(
+        token,
+        {},
+        PK,
+        channel({ blossomServers: [PRIMAL, BACKUP] })
+      );
+
+      expect(result).toEqual({ ok: true, servers: [PRIMAL, BACKUP] });
+      expect(published[0].kind).toBe(10063);
+      expect(published[0].content).toBe('');
+      expect(published[0].tags).toEqual([
+        ['server', PRIMAL],
+        ['server', BACKUP],
+      ]);
+      expect(verifyEvent(published[0])).toBe(true);
+    });
+
+    it('does not publish an empty server list', async () => {
+      expect(
+        await provider.publishBlossomServerList(
+          token,
+          {},
+          PK,
+          channel({ blossomServers: [] })
+        )
+      ).toMatchObject({ ok: false });
+      expect(published).toHaveLength(0);
+    });
+  });
+
   describe('auto repost by other channels', () => {
     it('is registered as a post plug for nostr channels', () => {
       const plugs = Reflect.getMetadata(

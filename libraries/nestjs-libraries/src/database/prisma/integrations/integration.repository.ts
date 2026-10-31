@@ -98,6 +98,25 @@ export class IntegrationRepository {
     });
   }
 
+  updateCustomInstanceDetails(
+    org: string,
+    id: string,
+    customInstanceDetails: string
+  ) {
+    return this._integration.model.integration.update({
+      select: {
+        id: true,
+      },
+      where: {
+        id,
+        organizationId: org,
+      },
+      data: {
+        customInstanceDetails,
+      },
+    });
+  }
+
   async setTimes(org: string, id: string, times: IntegrationTimeDto) {
     return this._integration.model.integration.update({
       select: {

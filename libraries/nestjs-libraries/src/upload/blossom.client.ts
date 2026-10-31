@@ -248,3 +248,138 @@ export const deleteFromBlossom = async (params: {
 
   return false;
 };
+
+export type BlossomCheck = {
+  /**
+   * accepted    - the server would take an upload from this key
+   * rejected    - reachable, but it refuses this key / file (e.g. not a member)
+   * unknown     - reachable, but the server has no upload pre-check (BUD-06)
+   * unreachable - no usable answer
+   */
+  state: 'accepted' | 'rejected' | 'unknown' | 'unreachable';
+  status?: number;
+  reason?: string;
+};
+
+/**
+ * Asks the server whether it would accept an upload of this key (BUD-06,
+ * HEAD /upload) without sending a file. Used by the "Test" button.
+ */
+export const checkBlossomUpload = async (params: {
+  server?: string;
+  secretKey: Uint8Array;
+}): Promise<BlossomCheck> => {
+  try {
+    const server = normalizeBlossomServer(params.server);
+    if (!(await isSafePublicHttpsUrl(server))) {
+      return { state: 'unreachable', reason: 'Unsafe Blossom server URL' };
+    }
+
+    // a made up 1 MB png, nothing is uploaded
+    const sha256 = sha256Hex(Buffer.from('postiz-blossom-preflight'));
+
+    let res: Response | undefined;
+    for (const encoding of ['base64', 'base64url'] as const) {
+      res = await request(
+        server,
+        '/upload',
+        {
+          method: 'HEAD',
+          headers: {
+            Authorization: buildAuthorization(
+              params.secretKey,
+              'upload',
+              sha256,
+              'Upload Blob',
+              encoding
+            ),
+            'X-SHA-256': sha256,
+            'X-Content-Length': String(1024 * 1024),
+            'X-Content-Type': 'image/png',
+          },
+        },
+        15 * 1000
+      );
+
+      if (res.status !== 401) {
+        break;
+      }
+    }
+
+    if (!res) {
+      return { state: 'unreachable' };
+    }
+
+    if (res.ok) {
+      return { state: 'accepted', status: res.status };
+    }
+
+    // servers without BUD-06 simply do not know this route
+    if ([404, 405, 501].includes(res.status)) {
+      return { state: 'unknown', status: res.status };
+    }
+
+    return {
+      state: 'rejected',
+      status: res.status,
+      reason: reason(res),
+    };
+  } catch (err) {
+    return { state: 'unreachable', reason: (err as Error)?.message };
+  }
+};
+
+/**
+ * Asks `server` to copy a blob from `sourceUrl` (BUD-04, PUT /mirror), so the
+ * file does not have to be sent a second time. Never throws.
+ */
+export const mirrorToBlossom = async (params: {
+  server?: string;
+  secretKey: Uint8Array;
+  sourceUrl: string;
+  sha256: string;
+}): Promise<{ ok: boolean; status?: number; reason?: string }> => {
+  try {
+    const server = normalizeBlossomServer(params.server);
+    if (!(await isSafePublicHttpsUrl(server))) {
+      return { ok: false, reason: 'Unsafe Blossom server URL' };
+    }
+
+    let res: Response | undefined;
+    for (const encoding of ['base64', 'base64url'] as const) {
+      res = await request(
+        server,
+        '/mirror',
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: buildAuthorization(
+              params.secretKey,
+              'upload',
+              params.sha256,
+              'Upload Blob',
+              encoding
+            ),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url: params.sourceUrl }),
+        },
+        60 * 1000
+      );
+
+      if (res.status !== 401) {
+        break;
+      }
+    }
+
+    return res
+      ? {
+          ok: res.ok,
+          status: res.status,
+          reason: res.ok ? undefined : reason(res),
+        }
+      : { ok: false };
+  } catch (err) {
+    return { ok: false, reason: (err as Error)?.message };
+  }
+};

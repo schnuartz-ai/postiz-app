@@ -27,11 +27,18 @@ import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import {
+  BlossomDescriptor,
+  checkBlossomUpload,
   DEFAULT_BLOSSOM_SERVER,
+  mirrorToBlossom,
   normalizeBlossomServer,
   parseNostrSecretKey,
   uploadToBlossom,
 } from '@gitroom/nestjs-libraries/upload/blossom.client';
+import {
+  effectiveBlossomServers,
+  readNostrSettings,
+} from '@gitroom/nestjs-libraries/integrations/social/nostr.settings';
 
 // @ts-ignore
 global.WebSocket = WebSocket;
@@ -188,12 +195,30 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
   }
 
   /**
-   * Default relays + the write relays the account announced with NIP-65, so a
-   * note shows up wherever the account's followers actually read from.
+   * Default relays + the relays configured for the channel + the write relays
+   * the account announced with NIP-65, so a note shows up wherever the
+   * account's followers actually read from.
    */
-  private async getPublishRelays(pubkey: string): Promise<string[]> {
+  private async getPublishRelays(
+    pubkey: string,
+    configured: string[] = []
+  ): Promise<string[]> {
     const base = this.relays();
+
+    // never connect to internal addresses just because somebody typed them in
+    const onlyPublic = async (relays: string[], max: number) => {
+      const safe: string[] = [];
+      for (const relay of relays.slice(0, max)) {
+        if (await isSafePublicHttpsUrl(relay.replace(/^wss:/i, 'https:'))) {
+          safe.push(relay);
+        }
+      }
+      return safe;
+    };
+
     try {
+      const own = await onlyPublic(configured, 20);
+
       const evt = await pool.get(
         base,
         { kinds: [10002], authors: [pubkey], limit: 1 },
@@ -209,18 +234,20 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
         )
         .map((t) => t[1].replace(/\/+$/, ''));
 
-      // never connect to internal addresses just because an account says so
-      const safe: string[] = [];
-      for (const relay of announced.slice(0, 8)) {
-        if (await isSafePublicHttpsUrl(relay.replace(/^wss:/i, 'https:'))) {
-          safe.push(relay);
-        }
-      }
-
-      return Array.from(new Set([...base, ...safe]));
+      return Array.from(
+        new Set([...base, ...own, ...(await onlyPublic(announced, 8))])
+      );
     } catch {
       return base;
     }
+  }
+
+  /** Same as getPublishRelays, with the relays saved in the channel settings. */
+  private relaysFor(integration?: Integration, pubkey?: string) {
+    return this.getPublishRelays(
+      (pubkey || integration?.internalId) as string,
+      readNostrSettings(integration?.customInstanceDetails).relays
+    );
   }
 
   /**
@@ -250,39 +277,24 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     return parseNostrSecretKey(password);
   }
 
-  /** Blossom server of the channel, falls back to the instance default. */
-  private getBlossomServer(integration?: Integration): string | undefined {
-    if (process.env.NOSTR_BLOSSOM_DISABLED === 'true') {
-      return undefined;
-    }
-
-    try {
-      if (integration?.customInstanceDetails) {
-        const details = JSON.parse(
-          AuthService.fixedDecryption(integration.customInstanceDetails)
-        );
-        if (details?.blossom) {
-          return normalizeBlossomServer(details.blossom);
-        }
-      }
-    } catch {
-      /** fall through to the default **/
-    }
-
-    return normalizeBlossomServer(
-      process.env.NOSTR_BLOSSOM_SERVER_URL || process.env.BLOSSOM_SERVER_URL
+  /** Blossom servers of the channel (first = primary), or the instance default. */
+  private getBlossomServers(integration?: Integration): string[] {
+    return effectiveBlossomServers(
+      readNostrSettings(integration?.customInstanceDetails)
     );
   }
 
   /**
-   * Moves the media of a post to the Blossom server so our own storage is not
-   * needed for what ends up inside the note. If the upload fails we keep the
-   * original URL, a Blossom outage must never block a post.
+   * Moves the media of a post to Blossom so our own storage is not needed for
+   * what ends up inside the note. The first server that takes the file is the
+   * one the note links to, the servers after it get a mirror copy as backup.
+   * If no server works we keep the original URL, a Blossom outage must never
+   * block a post.
    */
   private async hostMedia(
     media: MediaContent[] | undefined,
     secretKey: Uint8Array,
-    server: string | undefined
+    servers: string[]
   ): Promise<HostedMedia[]> {
     const hosted: HostedMedia[] = [];
 
@@ -294,41 +306,132 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
 
       const fallback: HostedMedia = { url: publicUrl, alt: m.alt };
 
-      if (!server) {
+      if (!servers.length) {
         hosted.push(fallback);
         continue;
       }
 
-      try {
-        if (new URL(publicUrl).host === new URL(server).host) {
+      let data: Buffer | undefined;
+      let main: Pick<BlossomDescriptor, 'url' | 'sha256'> & {
+        type?: string;
+        size?: number;
+      };
+      let backups: string[];
+
+      const onPrimary = this.sameHost(publicUrl, servers[0]);
+      const hashInUrl = publicUrl.match(/[0-9a-f]{64}/i)?.[0]?.toLowerCase();
+
+      if (onPrimary && hashInUrl) {
+        // already there (e.g. STORAGE_PROVIDER=blossom), only the backups are left
+        main = { url: publicUrl, sha256: hashInUrl };
+        backups = servers.slice(1);
+      } else if (onPrimary) {
+        hosted.push(fallback);
+        continue;
+      } else {
+        try {
+          data = Buffer.from(await readOrFetch(m.path || publicUrl));
+        } catch (err) {
+          console.warn(
+            `Nostr: could not read media, keeping original url (${
+              (err as Error)?.message
+            })`
+          );
           hosted.push(fallback);
           continue;
         }
-      } catch {
-        /** relative path, needs to be uploaded **/
+
+        let uploaded: BlossomDescriptor | undefined;
+        let used = -1;
+        for (const [index, server] of servers.entries()) {
+          try {
+            uploaded = await uploadToBlossom({ server, secretKey, data });
+            used = index;
+            break;
+          } catch (err) {
+            console.warn(
+              `Nostr: Blossom upload failed (${(err as Error)?.message})`
+            );
+          }
+        }
+
+        if (!uploaded) {
+          hosted.push(fallback);
+          continue;
+        }
+
+        main = uploaded;
+        backups = servers.slice(used + 1);
       }
 
-      try {
-        const data = Buffer.from(await readOrFetch(m.path || publicUrl));
-        const uploaded = await uploadToBlossom({ server, secretKey, data });
-        hosted.push({
-          url: uploaded.url,
-          mime: uploaded.type,
-          sha256: uploaded.sha256,
-          size: uploaded.size,
-          alt: m.alt,
-        });
-      } catch (err) {
-        console.warn(
-          `Nostr: Blossom upload failed, keeping original url (${
-            (err as Error)?.message
-          })`
-        );
-        hosted.push(fallback);
-      }
+      await Promise.allSettled(
+        backups.map((server) =>
+          this.mirror(server, secretKey, main.url, main.sha256, data)
+        )
+      );
+
+      hosted.push({
+        url: main.url,
+        mime: main.type,
+        sha256: main.sha256,
+        size: main.size,
+        alt: m.alt,
+      });
     }
 
     return hosted;
+  }
+
+  private sameHost(url: string, server: string) {
+    try {
+      return new URL(url).host === new URL(server).host;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Backup copy: ask the server to fetch the file (BUD-04), else send it. */
+  private async mirror(
+    server: string,
+    secretKey: Uint8Array,
+    sourceUrl: string,
+    sha256: string,
+    data?: Buffer
+  ) {
+    const result = await mirrorToBlossom({
+      server,
+      secretKey,
+      sourceUrl,
+      sha256,
+    });
+
+    if (result.ok) {
+      return;
+    }
+
+    // 403/413/415/429 would fail for a direct upload as well
+    const retryable =
+      !result.status || [400, 404, 405, 501, 502].includes(result.status);
+
+    if (data && retryable) {
+      try {
+        await uploadToBlossom({ server, secretKey, data });
+        return;
+      } catch (err) {
+        console.warn(
+          `Nostr: backup upload to ${server} failed (${
+            (err as Error)?.message
+          })`
+        );
+        return;
+      }
+    }
+
+    console.warn(
+      `Nostr: backup copy on ${server} failed (${
+        result.reason || result.status
+      })`
+    );
   }
 
   /** p tags for @mentions, q tags for quoted notes (NIP-27) and t tags. */
@@ -457,7 +560,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     const hosted = await this.hostMedia(
       firstPost.media,
       secretKey,
-      this.getBlossomServer(integration)
+      this.getBlossomServers(integration)
     );
     const { content, tags } = this.buildNote(firstPost.message, hosted);
 
@@ -471,7 +574,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
       secretKey
     );
 
-    const relays = await this.getPublishRelays(id);
+    const relays = await this.relaysFor(integration, id);
     const eventId = await this.publishEvent(relays, event);
 
     return [
@@ -498,7 +601,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     const hosted = await this.hostMedia(
       commentPost.media,
       secretKey,
-      this.getBlossomServer(integration)
+      this.getBlossomServers(integration)
     );
     const { content, tags } = this.buildNote(commentPost.message, hosted);
 
@@ -520,7 +623,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
       secretKey
     );
 
-    const relays = await this.getPublishRelays(id);
+    const relays = await this.relaysFor(integration, id);
     const eventId = await this.publishEvent(relays, event);
 
     return [
@@ -531,6 +634,72 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
         status: 'completed',
       },
     ];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Blossom server settings (called from the "Nostr settings" dialog through
+  // /integrations/function, they must not throw)
+  // ---------------------------------------------------------------------------
+
+  /** "Test" button: would this server take an upload from the channel's key? */
+  async testBlossomServer(
+    token: string,
+    data: { server: string },
+    id: string,
+    integration: Integration
+  ) {
+    let server: string;
+    try {
+      server = normalizeBlossomServer(data?.server);
+    } catch {
+      return {
+        server: data?.server,
+        state: 'unreachable',
+        reason: 'Invalid URL',
+      };
+    }
+
+    return {
+      server,
+      ...(await checkBlossomUpload({
+        server,
+        secretKey: this.getSecretKey(token),
+      })),
+    };
+  }
+
+  /**
+   * "Publish server list" button: writes the saved servers as the account's
+   * kind 10063 list (BUD-03), so other apps find the backup copies when a link
+   * to the first server stops working.
+   */
+  async publishBlossomServerList(
+    token: string,
+    data: unknown,
+    id: string,
+    integration: Integration
+  ) {
+    const servers = this.getBlossomServers(integration);
+    if (!servers.length) {
+      return { ok: false, reason: 'No Blossom server configured' };
+    }
+
+    try {
+      const event = finalizeEvent(
+        {
+          kind: 10063,
+          created_at: Math.floor(Date.now() / 1000),
+          content: '',
+          tags: servers.map((server) => ['server', server]),
+        },
+        this.getSecretKey(token)
+      );
+
+      await this.publishEvent(await this.relaysFor(integration, id), event);
+      return { ok: true, servers };
+    } catch (err) {
+      return { ok: false, reason: (err as Error)?.message };
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -553,8 +722,8 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     // the original note was just published, give the relays a moment
     const lookupRelays = Array.from(
       new Set([
-        ...(await this.getPublishRelays(originalIntegration.internalId)),
-        ...(await this.getPublishRelays(integration.internalId)),
+        ...(await this.relaysFor(originalIntegration)),
+        ...(await this.relaysFor(integration)),
       ])
     );
 
@@ -583,7 +752,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     id: string,
     fields: { likesAmount: string }
   ) {
-    const relays = await this.getPublishRelays(integration.internalId);
+    const relays = await this.relaysFor(integration);
     const needed = Math.max(1, Number(fields?.likesAmount) || 1);
 
     if ((await this.countLikes(id, integration.internalId, relays)) < needed) {
@@ -681,10 +850,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
       secretKey
     );
 
-    await this.publishEvent(
-      await this.getPublishRelays(integration.internalId),
-      repost
-    );
+    await this.publishEvent(await this.relaysFor(integration), repost);
   }
 
   // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.req
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 import { IntegrationTimeDto } from '@gitroom/nestjs-libraries/dtos/integrations/integration.time.dto';
 import { PlugDto } from '@gitroom/nestjs-libraries/dtos/plugs/plug.dto';
+import { NostrSettingsDto } from '@gitroom/nestjs-libraries/dtos/integrations/nostr.settings.dto';
 import { RefreshToken } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 
 import { timer } from '@gitroom/helpers/utils/timer';
@@ -121,6 +122,23 @@ export class IntegrationsController {
         })
       ),
     };
+  }
+
+  @Get('/:id/nostr-settings')
+  getNostrSettings(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._integrationService.getNostrSettings(org.id, id);
+  }
+
+  @Post('/:id/nostr-settings')
+  updateNostrSettings(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Body() body: NostrSettingsDto
+  ) {
+    return this._integrationService.updateNostrSettings(org.id, id, body);
   }
 
   @Post('/:id/settings')
