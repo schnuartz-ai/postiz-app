@@ -77,6 +77,78 @@ describe('NostrProvider', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
+  describe('connecting a channel with an nsec', () => {
+    const nsec = nip19.nsecEncode(SK);
+    const code = (password: string) =>
+      Buffer.from(
+        JSON.stringify({ password, blossom: 'https://blossom.primal.net' })
+      ).toString('base64');
+
+    // the connect form builds its check from the validation string of the field
+    const formAccepts = async (value: string) => {
+      const field = (await provider.customFields()).find(
+        (f) => f.key === 'password'
+      )!;
+      const parts = field.validation.split('/');
+      return new RegExp(parts.slice(1, -1).join('/'), parts.pop()).test(value);
+    };
+
+    it('the form takes an nsec and a hex key, and rejects everything else', async () => {
+      expect(nsec).toMatch(/^nsec1/);
+      expect(await formAccepts(nsec)).toBe(true);
+      expect(await formAccepts(SK_HEX)).toBe(true);
+      expect(await formAccepts(SK_HEX.toUpperCase())).toBe(true);
+      expect(await formAccepts(nip19.npubEncode(PK))).toBe(false);
+      expect(await formAccepts('hello')).toBe(false);
+    });
+
+    it('nsec and hex give the same channel, the key is stored as hex', async () => {
+      const fromNsec: any = await provider.authenticate({
+        code: code(nsec),
+        codeVerifier: '',
+      });
+      const fromHex: any = await provider.authenticate({
+        code: code(SK_HEX),
+        codeVerifier: '',
+      });
+
+      expect(fromNsec.id).toBe(PK);
+      expect(fromHex.id).toBe(PK);
+      expect(
+        (AuthService.verifyJWT(fromNsec.accessToken) as any).password
+      ).toBe(SK_HEX);
+    });
+
+    it('a note posted with that channel is signed by the nsec key', async () => {
+      const channel: any = await provider.authenticate({
+        code: code(nsec),
+        codeVerifier: '',
+      });
+
+      const [res] = await provider.post(
+        channel.id,
+        channel.accessToken,
+        [{ id: 'db-id', message: 'hello from nsec', settings: {} }],
+        {} as any
+      );
+
+      expect(published[0].pubkey).toBe(PK);
+      expect(verifyEvent(published[0])).toBe(true);
+      expect(res.postId).toBe(published[0].id);
+    });
+
+    it('refuses an npub, a wrong checksum and garbage', async () => {
+      const wrongChecksum =
+        nsec.slice(0, -1) + (nsec.endsWith('q') ? 'p' : 'q');
+
+      for (const value of [nip19.npubEncode(PK), wrongChecksum, 'hello', '']) {
+        expect(
+          await provider.authenticate({ code: code(value), codeVerifier: '' })
+        ).toBe('Invalid credentials');
+      }
+    });
+  });
+
   describe('mentions', () => {
     it('formats mentions as NIP-27 references', () => {
       expect(provider.mentionFormat(FRIEND_NPUB, 'Friend')).toBe(
