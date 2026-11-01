@@ -181,6 +181,8 @@ export interface SocialProvider
     ISocialMediaIntegration {
   identifier: string;
   refreshWait?: boolean;
+  // Persist blocking publication results before follow-up work and reuse them on retry.
+  persistLegacyPublication?: boolean;
   convertToJPEG?: boolean;
   stripLinks?: () => boolean;
   refreshCron?: boolean;

@@ -349,10 +349,26 @@ export class PostActivity {
     posts: Post[],
     allowPending: boolean
   ) {
+    const getIntegration = this._integrationManager.getSocialIntegration(
+      integration.providerIdentifier
+    );
+
     // Stage markers: whatever ran last is what a timed-out activity reports.
     // Providers that go through this.fetch overwrite these with the exact URL;
     // the ones on their own HTTP client (x, youtube, bluesky) are still
     // narrowed down to the step they hung on.
+    // Workflow inputs can predate a persisted successful publication.
+    if (!allowPending && getIntegration.persistLegacyPublication && posts.length === 1) {
+      const [saved] = await this._postService.getPostsRecursively(
+        posts[0].id, true, integration.organizationId
+      );
+      if (saved && saved.state === 'PUBLISHED' && saved.integrationId === integration.id && saved.releaseId &&
+          saved.releaseId !== 'missing' && saved.releaseURL) {
+        return [{ id: saved.id, postId: saved.releaseId,
+          releaseURL: saved.releaseURL, status: 'posted' as const }];
+      }
+    }
+
     setHeartbeatDetails('subscription lookup');
     if (process.env.STRIPE_SECRET_KEY) {
       const subscription = await this._subscriptionService.getSubscription(
@@ -363,10 +379,6 @@ export class PostActivity {
         throw new Error('No active subscription found for this organization.');
       }
     }
-
-    const getIntegration = this._integrationManager.getSocialIntegration(
-      integration.providerIdentifier
-    );
 
     setHeartbeatDetails('update tags');
     const newPosts = await this._postService.updateTags(
@@ -411,6 +423,16 @@ export class PostActivity {
             mappedPosts,
             integration
           );
+
+    // Persist completed legacy provider results before follow-up work can fail.
+    // Pending responses have no publication id and must remain pending.
+    if (!allowPending && getIntegration.persistLegacyPublication) {
+      for (const result of postNow) {
+        if (result.status === 'posted' && result.postId && result.releaseURL) {
+          await this._postService.updatePost(result.id, result.postId, result.releaseURL);
+        }
+      }
+    }
 
     // The post is already published at this point: the streak is best-effort,
     // failing the activity here would retry it and publish again.

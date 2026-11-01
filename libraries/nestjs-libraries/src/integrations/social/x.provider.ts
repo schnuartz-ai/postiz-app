@@ -74,6 +74,7 @@ type XPendingData = {
 )
 export class XProvider extends SocialAbstract implements SocialProvider {
   identifier = 'x';
+  persistLegacyPublication = true;
   name = 'X';
   isBetweenSteps = false;
   scopes = [] as string[];
@@ -155,6 +156,9 @@ export class XProvider extends SocialAbstract implements SocialProvider {
         value: string;
       }
     | undefined {
+    if (body.includes('credits-depleted') || body.includes('credits depleted') || body.includes('Payment Required')) {
+      return { type: 'bad-body', value: 'X API credits are depleted. Top up the credits for the connected developer project, then retry this post.' };
+    }
     if (body.includes('You are not permitted to perform this action')) {
       return {
         type: 'bad-body',
@@ -715,6 +719,25 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     }
   }
 
+  private async uploadImage(
+    client: TwitterApi,
+    path: string,
+    asArticleImage: boolean
+  ) {
+    const input = Buffer.from(await this.readOrFetch(path));
+    const metadata = await sharp(input, { animated: true }).metadata();
+    const animated = !asArticleImage && metadata.format === 'gif';
+    const image = sharp(input, { animated }).rotate().resize({
+      width: 1000,
+      withoutEnlargement: true,
+    });
+    const buffer = await (animated ? image.gif() : image.jpeg()).toBuffer();
+    return client.v2.uploadMedia(buffer, {
+      media_type: animated ? 'image/gif' : 'image/jpeg',
+      ...(asArticleImage ? { media_category: 'tweet_image' as const } : {}),
+    });
+  }
+
   private async uploadMediaEntries(
     client: TwitterApi,
     postDetails: PostDetails<any>[],
@@ -734,37 +757,8 @@ export class XProvider extends SocialAbstract implements SocialProvider {
                   this.uploadVideoInChunks(client, m.path)
                 )
               : {
-                  // Articles reject GIF media, so the tweet pipeline (which
-                  // converts every image to GIF) can't be reused for them -
-                  // article images are uploaded as JPEG with the tweet_image
-                  // category the article references them by.
-                  mediaId: await this.uploadWithRateLimitRetry(async () =>
-                    asArticleImage
-                      ? client.v2.uploadMedia(
-                          await sharp(await this.readOrFetch(m.path))
-                            .resize({
-                              width: 1000,
-                            })
-                            .jpeg()
-                            .toBuffer(),
-                          {
-                            media_type: 'image/jpeg' as any,
-                            media_category: 'tweet_image' as any,
-                          }
-                        )
-                      : client.v2.uploadMedia(
-                          await sharp(await this.readOrFetch(m.path), {
-                            animated: lookup(m.path) === 'image/gif',
-                          })
-                            .resize({
-                              width: 1000,
-                            })
-                            .gif()
-                            .toBuffer(),
-                          {
-                            media_type: (lookup(m.path) || '') as any,
-                          }
-                        )
+                  mediaId: await this.uploadWithRateLimitRetry(() =>
+                    this.uploadImage(client, m.path, asArticleImage)
                   ),
                   processing: false,
                 },

@@ -340,7 +340,7 @@ export const withProvider = function <T extends object>(params: {
                       <div className="text-[20px]">{selectedIntegration?.integration.name}</div>
                     </div>
                   )}
-                  <SettingsComponent />
+                  {SettingsComponent && <SettingsComponent />}
                   {!!data?.internalPlugs?.length && !dummy && (
                     <InternalChannels plugs={data?.internalPlugs} />
                   )}

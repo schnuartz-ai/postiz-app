@@ -16,6 +16,7 @@ import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { Post } from '@prisma/client';
+import { EditorErrorBoundary } from '@gitroom/frontend/components/new-launch/editor.error.boundary';
 
 export interface AddEditModalProps {
   dummy?: boolean;
@@ -70,7 +71,11 @@ export const AddEditModal: FC<AddEditModalProps> = (props) => {
     return null;
   }
 
-  return <AddEditModalInner {...props} />;
+  return (
+    <EditorErrorBoundary>
+      <AddEditModalInner {...props} />
+    </EditorErrorBoundary>
+  );
 };
 
 export const AddEditModalInner: FC<AddEditModalProps> = (props) => {
@@ -150,9 +155,9 @@ export const AddEditModalInner: FC<AddEditModalProps> = (props) => {
 const postValues = (posts: Post[]) =>
   posts.map((post) => ({
     delay: post.delay,
-    content: /<p[\s>]/i.test(post.content)
+    content: /<p[\s>]/i.test(post.content || '')
       ? post.content
-      : post.content
+      : (post.content || '')
           .split('\n')
           .map((line: string) => `<p>${line}</p>`)
           .join(''),
@@ -239,9 +244,9 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
       props.onlyValues?.length
         ? props.onlyValues.map((p) => ({
             content:
-              /<p[\s>]/i.test(p.content)
+              /<p[\s>]/i.test(p.content || '')
                 ? p.content
-                : p.content
+                : (p.content || '')
                     .split('\n')
                     .map((line: string) => `<p>${line}</p>`)
                     .join(''),
@@ -252,9 +257,9 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
         ? props.set.posts[0].value.map((p: any) => ({
             id: makeId(10),
             content:
-              /<p[\s>]/i.test(p.content)
+              /<p[\s>]/i.test(p.content || '')
                 ? p.content
-                : p.content
+                : (p.content || '')
                     .split('\n')
                     .map((line: string) => `<p>${line}</p>`)
                     .join(''),
