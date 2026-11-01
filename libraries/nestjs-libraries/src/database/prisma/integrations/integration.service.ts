@@ -28,6 +28,14 @@ import utc from 'dayjs/plugin/utc';
 import { AutopostRepository } from '@gitroom/nestjs-libraries/database/prisma/autopost/autopost.repository';
 import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integrations/refresh.integration.service';
 import { TemporalService } from 'nestjs-temporal-core';
+import { NostrSettingsDto } from '@gitroom/nestjs-libraries/dtos/integrations/nostr.settings.dto';
+import {
+  configuredBlossomServers,
+  readNostrSettings,
+  sanitizeNostrSettings,
+  toNpub,
+  writeNostrSettings,
+} from '@gitroom/nestjs-libraries/integrations/social/nostr.settings';
 
 dayjs.extend(utc);
 
@@ -81,6 +89,56 @@ export class IntegrationService {
       id,
       additionalSettings
     );
+  }
+
+  private async getNostrIntegration(org: string, id: string) {
+    const integration = await this._integrationRepository.getIntegrationById(
+      org,
+      id
+    );
+
+    if (
+      !integration ||
+      integration.providerIdentifier !== 'nostr' ||
+      !integration.customInstanceDetails
+    ) {
+      throw new HttpException('Invalid Nostr channel', HttpStatus.BAD_REQUEST);
+    }
+
+    return integration as Integration & { customInstanceDetails: string };
+  }
+
+  async getNostrSettings(org: string, id: string) {
+    const integration = await this.getNostrIntegration(org, id);
+    const settings = readNostrSettings(integration.customInstanceDetails);
+
+    return {
+      pubkey: integration.internalId,
+      npub: toNpub(integration.internalId),
+      blossomServers: configuredBlossomServers(settings),
+      relays: settings.relays,
+      // the person running this instance can switch Blossom off for everyone
+      blossomDisabledByInstance: process.env.NOSTR_BLOSSOM_DISABLED === 'true',
+    };
+  }
+
+  async updateNostrSettings(org: string, id: string, body: NostrSettingsDto) {
+    const integration = await this.getNostrIntegration(org, id);
+
+    let clean: { blossomServers: string[]; relays: string[] };
+    try {
+      clean = sanitizeNostrSettings(body);
+    } catch (err) {
+      throw new HttpException((err as Error).message, HttpStatus.BAD_REQUEST);
+    }
+
+    await this._integrationRepository.updateCustomInstanceDetails(
+      org,
+      id,
+      writeNostrSettings(integration.customInstanceDetails, clean)
+    );
+
+    return clean;
   }
 
   checkPreviousConnections(org: string, id: string) {

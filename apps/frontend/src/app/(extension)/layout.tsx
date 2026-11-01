@@ -21,7 +21,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <VariableContextComponent
           language="en"
           storageProvider={
-            process.env.STORAGE_PROVIDER! as 'local' | 'cloudflare'
+            // "blossom" uploads are proxied through the backend, exactly like "local"
+            process.env.STORAGE_PROVIDER === 'cloudflare'
+              ? 'cloudflare'
+              : 'local'
           }
           stripeClient=""
           environment={process.env.NODE_ENV!}

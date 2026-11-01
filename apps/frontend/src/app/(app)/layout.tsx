@@ -49,7 +49,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       >
         <VariableContextComponent
           storageProvider={
-            process.env.STORAGE_PROVIDER! as 'local' | 'cloudflare'
+            // "blossom" uploads are proxied through the backend, exactly like "local"
+            process.env.STORAGE_PROVIDER === 'cloudflare'
+              ? 'cloudflare'
+              : 'local'
           }
           environment={process.env.NODE_ENV!}
           backendUrl={process.env.NEXT_PUBLIC_BACKEND_URL!}

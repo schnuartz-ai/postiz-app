@@ -1,6 +1,7 @@
 import { CloudflareStorage } from './cloudflare.storage';
 import { IUploadProvider } from './upload.interface';
 import { LocalStorage } from './local.storage';
+import { BlossomStorage } from './blossom.storage';
 import { IMediaProcessor } from './media.processor.interface';
 import { RunPodMediaProcessor } from './runpod.media.processor';
 import {
@@ -15,6 +16,11 @@ export class UploadFactory {
     const storageProvider = process.env.STORAGE_PROVIDER || 'local';
 
     switch (storageProvider) {
+      case 'blossom':
+        return new BlossomStorage(
+          process.env.BLOSSOM_SERVER_URL,
+          process.env.BLOSSOM_SECRET_KEY!
+        );
       case 'local':
         return new LocalStorage(process.env.UPLOAD_DIRECTORY!);
       case 'cloudflare':

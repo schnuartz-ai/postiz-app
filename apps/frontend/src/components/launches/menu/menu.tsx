@@ -23,6 +23,7 @@ import { BotPicture } from '@gitroom/frontend/components/launches/bot.picture';
 import { CustomerModal } from '@gitroom/frontend/components/launches/customer.modal';
 import { Integration } from '@prisma/client';
 import { SettingsModal } from '@gitroom/frontend/components/launches/settings.modal';
+import { NostrSettingsModal } from '@gitroom/frontend/components/launches/nostr/nostr.settings.modal';
 import { CustomVariables } from '@gitroom/frontend/components/launches/add.provider.component';
 import { useRouter } from 'next/navigation';
 import { useVariables } from '@gitroom/react/helpers/variable.context';
@@ -317,6 +318,21 @@ export const Menu: FC<{
     });
     setShow(false);
   }, [integrations]);
+  const nostrSettings = useCallback(() => {
+    modal.openModal({
+      title: t('nostr_settings', 'Nostr Settings'),
+      children: (
+        <NostrSettingsModal
+          integrationId={id}
+          onClose={() => {
+            modal.closeAll();
+            mutate();
+          }}
+        />
+      ),
+    });
+    setShow(false);
+  }, [id, t]);
   const additionalSettings = useCallback(() => {
     const findIntegration = integrations.find(
       (integration) => integration.id === id
@@ -535,6 +551,33 @@ export const Menu: FC<{
               </div>
               <div className="text-[14px]">
                 {t('update_credentials', 'Update Credentials')}
+              </div>
+            </div>
+          )}
+          {findIntegration?.identifier === 'nostr' && (
+            <div
+              className="flex gap-[12px] items-center py-[8px] px-[10px]"
+              onClick={nostrSettings}
+            >
+              <div>
+                <svg
+                  width={18}
+                  height={18}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <rect x="3" y="4" width="18" height="6" rx="2" />
+                  <rect x="3" y="14" width="18" height="6" rx="2" />
+                  <path d="M7 7h.01M7 17h.01" />
+                </svg>
+              </div>
+              <div className="text-[14px]">
+                {t('nostr_settings', 'Nostr Settings')}
               </div>
             </div>
           )}
