@@ -7,11 +7,18 @@ import {
 import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import dayjs from 'dayjs';
 import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
-import { getPublicKey, Relay, finalizeEvent, SimplePool } from 'nostr-tools';
+import {
+  getPublicKey,
+  Relay,
+  finalizeEvent,
+  SimplePool,
+  nip19,
+} from 'nostr-tools';
 
 import WebSocket from 'ws';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { Integration } from '@prisma/client';
+import { PostPlug } from '@gitroom/helpers/decorators/post.plug';
 
 // @ts-ignore
 global.WebSocket = WebSocket;
@@ -33,7 +40,8 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
   isBetweenSteps = false;
   scopes = [] as string[];
   editor = 'normal' as const;
-  toolTip = 'Make sure you private a HEX key of your Nostr private key, you can get it from websites like iris.to'
+  toolTip =
+    'Enter your Nostr private key in HEX format (64 hex chars) or nsec format (nsec1...). You can export it from apps like iris.to or Damus.';
 
   maxLength() {
     return 100000;
@@ -71,9 +79,24 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     };
   }
 
+  // Accepts a HEX private key (64 chars) or an nsec (bech32) private key.
   private secretKey(password: string) {
+    const key = password.trim();
+    if (key.startsWith('nsec1')) {
+      const decoded = nip19.decode(key);
+      if (decoded.type === 'nsec') {
+        return decoded.data;
+      }
+    }
+
+    // anything else must be a real 64 char HEX key, otherwise a mistyped key
+    // (or an npub) would silently turn into a different, bogus identity
+    if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+      throw new Error('Invalid Nostr private key');
+    }
+
     return Uint8Array.from(
-      (password.match(/.{1,2}/g) || []).map((byte: any) => parseInt(byte, 16))
+      (key.match(/.{1,2}/g) || []).map((byte: any) => parseInt(byte, 16))
     );
   }
 
@@ -143,14 +166,17 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     try {
       const body = JSON.parse(Buffer.from(params.code, 'base64').toString());
 
-      const pubkey = getPublicKey(this.secretKey(body.password));
+      const secretKey = this.secretKey(body.password);
+      const pubkey = getPublicKey(secretKey);
 
       const user = await this.findRelayInformation(pubkey);
 
       return {
         id: pubkey,
         name: user.display_name || user.displayName || user.name || 'No Name',
-        accessToken: AuthService.signJWT({ password: body.password }),
+        accessToken: AuthService.signJWT({
+          password: Buffer.from(secretKey).toString('hex'),
+        }),
         refreshToken: '',
         expiresIn: dayjs().add(200, 'year').unix() - dayjs().unix(),
         picture: user?.picture || '',
@@ -187,16 +213,47 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
       this.secretKey(password)
     );
 
-    const eventId = await this.publish(id, textEvent);
+    await this.publish(id, textEvent);
 
     return [
       {
         id: firstPost.id,
-        postId: String(eventId),
-        releaseURL: `https://primal.net/e/${eventId}`,
+        postId: String(textEvent.id),
+        releaseURL: `https://primal.net/e/${textEvent.id}`,
         status: 'completed',
       },
     ];
+  }
+
+  @PostPlug({
+    identifier: 'nostr-repost-post-users',
+    title: 'Add Re-posters',
+    description: 'Add accounts to repost your post',
+    pickIntegration: ['nostr'],
+    fields: [],
+  })
+  async repostPostUsers(
+    integration: Integration,
+    originalIntegration: Integration,
+    postId: string,
+    information: any
+  ) {
+    const { password } = AuthService.verifyJWT(integration.token) as any;
+
+    const repostEvent = finalizeEvent(
+      {
+        kind: 6, // NIP-18 Repost
+        content: '',
+        tags: [
+          ['e', postId, list[0]], // event-id + relay hint
+          ['p', originalIntegration.internalId],
+        ],
+        created_at: Math.floor(Date.now() / 1000),
+      },
+      this.secretKey(password)
+    );
+
+    await this.publish(integration.internalId, repostEvent);
   }
 
   async comment(
@@ -224,13 +281,13 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
       this.secretKey(password)
     );
 
-    const eventId = await this.publish(id, textEvent);
+    await this.publish(id, textEvent);
 
     return [
       {
         id: commentPost.id,
-        postId: String(eventId),
-        releaseURL: `https://primal.net/e/${eventId}`,
+        postId: String(textEvent.id),
+        releaseURL: `https://primal.net/e/${textEvent.id}`,
         status: 'completed',
       },
     ];

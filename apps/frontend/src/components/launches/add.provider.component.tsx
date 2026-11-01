@@ -220,9 +220,9 @@ export const CustomVariables: FC<{
       const { url } = await response.json();
       modals.closeAll();
       gotoUrl(
-        `/integrations/social/${identifier}?state=${url}&code=${Buffer.from(
+        `/integrations/social/${identifier}?state=${url}&code=${encodeURIComponent(Buffer.from(
           JSON.stringify(data)
-        ).toString('base64')}${onboarding ? '&onboarding=true' : ''}`
+        ).toString('base64'))}${onboarding ? '&onboarding=true' : ''}`
       );
     },
     [variables, onboarding]
@@ -625,9 +625,9 @@ export const AddProviderComponent: FC<{
             }
             const { url } = await response.json();
             modal.closeAll();
-            window.location.href = `/integrations/social/${identifier}?state=${url}&code=${Buffer.from(
+            window.location.href = `/integrations/social/${identifier}?state=${url}&code=${encodeURIComponent(Buffer.from(
               JSON.stringify(cookieResponse.cookies)
-            ).toString('base64')}${onboarding ? '&onboarding=true' : ''}`;
+            ).toString('base64'))}${onboarding ? '&onboarding=true' : ''}`;
           } catch {
             toaster.show(
               t(
