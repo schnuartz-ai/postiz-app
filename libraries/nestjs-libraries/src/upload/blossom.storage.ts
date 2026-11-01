@@ -1,4 +1,5 @@
-import { IUploadProvider } from './upload.interface';
+import { Readable } from 'stream';
+import { IUploadProvider, UploadedStream } from './upload.interface';
 import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import { parseDataUrl } from '@gitroom/nestjs-libraries/upload/data.url';
@@ -6,10 +7,11 @@ import {
   deleteFromBlossom,
   normalizeBlossomServer,
   parseNostrSecretKey,
+  spoolStream,
   uploadToBlossom,
 } from '@gitroom/nestjs-libraries/upload/blossom.client';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { fromBuffer } = require('file-type');
+const { fileTypeFromBuffer } = require('file-type');
 
 const ALLOWED_MIME_TYPES = new Set<string>([
   'image/jpeg',
@@ -66,7 +68,7 @@ export class BlossomStorage implements IUploadProvider {
       body = Buffer.from(await load.arrayBuffer());
     }
 
-    const detected = await fromBuffer(body);
+    const detected = await fileTypeFromBuffer(body);
     if (!detected || !ALLOWED_MIME_TYPES.has(detected.mime)) {
       throw new Error('Unsupported file type.');
     }
@@ -82,7 +84,7 @@ export class BlossomStorage implements IUploadProvider {
   }
 
   async uploadFile(file: Express.Multer.File): Promise<any> {
-    const detected = await fromBuffer(file.buffer);
+    const detected = await fileTypeFromBuffer(file.buffer);
     if (!detected || !ALLOWED_MIME_TYPES.has(detected.mime)) {
       throw new Error('Unsupported file type.');
     }
@@ -101,6 +103,43 @@ export class BlossomStorage implements IUploadProvider {
       mimetype: detected.mime,
       originalname: filename,
     };
+  }
+
+  /**
+   * Uploads that arrive as a stream (the normal path for files from the
+   * editor, up to 1 GB). Blossom needs the hash of the whole file before the
+   * upload starts, so the stream is spooled to a temp file while it is hashed
+   * and then sent from disk. Nothing big is kept in memory.
+   */
+  async uploadStream(
+    stream: Readable,
+    mimetype: string,
+    ext: string
+  ): Promise<UploadedStream> {
+    if (!ALLOWED_MIME_TYPES.has(mimetype)) {
+      throw new Error('Unsupported file type.');
+    }
+
+    const spooled = await spoolStream(stream);
+
+    try {
+      const descriptor = await uploadToBlossom({
+        server: this.server,
+        secretKey: this.secretKey,
+        mime: mimetype,
+        file: spooled,
+      });
+
+      const filename = `${spooled.sha256}.${ext}`;
+      return {
+        filename,
+        path: descriptor.url,
+        mimetype,
+        originalname: filename,
+      };
+    } finally {
+      await spooled.cleanup();
+    }
   }
 
   async removeFile(filePath: string): Promise<void> {

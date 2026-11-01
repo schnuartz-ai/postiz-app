@@ -1,9 +1,21 @@
 import { createHash } from 'crypto';
+import { createWriteStream } from 'fs';
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { Readable, Transform } from 'stream';
+import { pipeline } from 'stream/promises';
 import { finalizeEvent, nip19 } from 'nostr-tools';
 import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { fromBuffer } = require('file-type');
+const { fileTypeFromBuffer } = require('file-type');
+// Node 22 has fs.openAsBlob (a file backed Blob that is streamed, not loaded),
+// the installed @types/node does not know it yet.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { openAsBlob } = require('fs') as {
+  openAsBlob(path: string, options?: { type?: string }): Promise<Blob>;
+};
 
 /**
  * Minimal Blossom (https://github.com/hzrd149/blossom) client.
@@ -128,20 +140,36 @@ const request = async (
 const reason = (res: Response) =>
   res.headers.get('x-reason') || `${res.status} ${res.statusText}`;
 
+/**
+ * Uploads a blob (BUD-02). Small files are passed as `data`; big videos stay
+ * on disk (`file`, with the hash and size already known) so they are streamed
+ * from there instead of being held in memory.
+ */
 export const uploadToBlossom = async (params: {
   server?: string;
   secretKey: Uint8Array;
-  data: Buffer;
   mime?: string;
+  data?: Buffer;
+  file?: { path: string; sha256: string; size: number };
 }): Promise<BlossomDescriptor> => {
   const server = normalizeBlossomServer(params.server);
   if (!(await isSafePublicHttpsUrl(server))) {
     throw new Error('Unsafe Blossom server URL');
   }
 
-  const detected = await fromBuffer(params.data);
+  if (!params.data && !params.file) {
+    throw new Error('Nothing to upload');
+  }
+
+  const detected = params.data
+    ? await fileTypeFromBuffer(params.data)
+    : undefined;
   const mime = params.mime || detected?.mime || 'application/octet-stream';
-  const sha256 = sha256Hex(params.data);
+  const sha256 = params.file ? params.file.sha256 : sha256Hex(params.data!);
+  const size = params.file ? params.file.size : params.data!.length;
+  const body: BodyInit = params.file
+    ? await openAsBlob(params.file.path, { type: mime })
+    : (params.data as any);
 
   // The spec says base64url, but many deployed servers/clients still use plain
   // base64. Try plain first (what most clients send), fall back to base64url.
@@ -163,7 +191,7 @@ export const uploadToBlossom = async (params: {
           'Content-Type': mime,
           'X-SHA-256': sha256,
         },
-        body: params.data,
+        body,
       },
       5 * 60 * 1000
     );
@@ -201,10 +229,65 @@ export const uploadToBlossom = async (params: {
   return {
     url,
     sha256,
-    size: descriptor.size ?? params.data.length,
+    size: descriptor.size ?? size,
     type: descriptor.type || mime,
     uploaded: descriptor.uploaded,
   };
+};
+
+export type SpooledFile = {
+  path: string;
+  sha256: string;
+  size: number;
+  /** sniffed from the first bytes */
+  mime?: string;
+  /** removes the temp file, call it when the upload is done */
+  cleanup: () => Promise<void>;
+};
+
+/**
+ * Blossom needs the hash of the whole file before the upload starts. A stream
+ * is therefore written to a temp file while it is hashed, so big videos never
+ * sit in memory.
+ */
+export const spoolStream = async (stream: Readable): Promise<SpooledFile> => {
+  const dir = await mkdtemp(join(tmpdir(), 'blossom-'));
+  const path = join(dir, 'blob');
+  const cleanup = () =>
+    rm(dir, { recursive: true, force: true }).catch(() => undefined);
+
+  try {
+    const hash = createHash('sha256');
+    let size = 0;
+    let head = Buffer.alloc(0);
+
+    await pipeline(
+      stream,
+      new Transform({
+        transform(chunk, _encoding, callback) {
+          hash.update(chunk);
+          size += chunk.length;
+          if (head.length < 4100) {
+            head = Buffer.concat([head, chunk]).subarray(0, 4100);
+          }
+          callback(null, chunk);
+        },
+      }),
+      createWriteStream(path)
+    );
+
+    const detected = await fileTypeFromBuffer(head);
+    return {
+      path,
+      sha256: hash.digest('hex'),
+      size,
+      mime: detected?.mime,
+      cleanup,
+    };
+  } catch (err) {
+    await cleanup();
+    throw err;
+  }
 };
 
 /** Best effort removal, never throws. */

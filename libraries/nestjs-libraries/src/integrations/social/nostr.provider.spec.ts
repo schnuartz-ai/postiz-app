@@ -10,10 +10,6 @@ import {
   verifyEvent,
 } from 'nostr-tools';
 
-const mockReadOrFetch = jest.fn();
-jest.mock('@gitroom/helpers/utils/read.or.fetch', () => ({
-  readOrFetch: (...args: any[]) => mockReadOrFetch(...args),
-}));
 // native module, not needed here
 jest.mock('bcrypt', () => ({ hashSync: jest.fn(), compareSync: jest.fn() }));
 jest.mock(
@@ -31,6 +27,9 @@ jest.mock(
 
 import { NostrProvider } from './nostr.provider';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
+import { readdirSync } from 'fs';
+import { tmpdir } from 'os';
+import { Readable } from 'stream';
 
 const SK_HEX = 'b'.repeat(63) + '2';
 const SK = Uint8Array.from(SK_HEX.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
@@ -42,11 +41,27 @@ const token = AuthService.signJWT({ password: SK_HEX });
 
 describe('NostrProvider', () => {
   let provider: NostrProvider;
+  let mockReadOrFetch: jest.Mock;
+  let mockMediaSize: jest.Mock;
+  let mockMediaStream: jest.Mock;
   let published: Event[];
 
   beforeEach(() => {
     provider = new NostrProvider();
     published = [];
+    // media is read through the SSRF-safe helpers of SocialAbstract
+    mockReadOrFetch = jest.fn();
+    mockMediaSize = jest.fn().mockResolvedValue(1024);
+    mockMediaStream = jest.fn();
+    jest
+      .spyOn(provider as any, 'readOrFetch')
+      .mockImplementation((...args: any[]) => mockReadOrFetch(...args));
+    jest
+      .spyOn(provider as any, 'mediaSize')
+      .mockImplementation((...args: any[]) => mockMediaSize(...args));
+    jest
+      .spyOn(provider as any, 'mediaStream')
+      .mockImplementation((...args: any[]) => mockMediaStream(...args));
 
     jest.spyOn(SimplePool.prototype, 'publish').mockImplementation(((
       relays: string[],
@@ -475,6 +490,55 @@ describe('NostrProvider', () => {
       expect(calls).toEqual([`PUT ${BACKUP}/upload`]);
     });
 
+    it('streams big videos through a temp file instead of memory', async () => {
+      const leftovers = () =>
+        readdirSync(tmpdir()).filter((name) => name.startsWith('blossom-'));
+      const before = leftovers();
+      const video = Buffer.concat([
+        Buffer.from('0000001866747970', 'hex'), // ....ftyp
+        Buffer.alloc(4000, 3),
+      ]);
+      const bodies: Buffer[] = [];
+      mockMediaSize.mockResolvedValue(30 * 1024 * 1024);
+      mockMediaStream.mockResolvedValue(Readable.from([video]));
+      global.fetch = jest.fn(async (url: any, init: any) => {
+        calls.push(`${init.method} ${url}`);
+        bodies.push(Buffer.from(await init.body.arrayBuffer()));
+        return new Response(
+          JSON.stringify({
+            sha256: init.headers['X-SHA-256'],
+            url: `${PRIMAL}/${init.headers['X-SHA-256']}.mp4`,
+          }),
+          { status: 200 }
+        );
+      }) as any;
+
+      await post(channel({ blossomServers: [PRIMAL] }));
+
+      expect(mockReadOrFetch).not.toHaveBeenCalled();
+      expect(bodies[0].equals(video)).toBe(true);
+      expect(published[0].content).toContain(`${PRIMAL}/`);
+      expect(published[0].content).toMatch(/\.mp4$/);
+      expect(leftovers()).toEqual(before);
+    });
+
+    it('can be called from the dashboard (and only what is marked)', () => {
+      // POST /integrations/function only runs methods marked @DashboardFunction
+      const callable = (method: string) =>
+        !!Reflect.getMetadata(
+          'custom:dashboard_function',
+          NostrProvider.prototype,
+          method
+        );
+
+      expect(callable('testBlossomServer')).toBe(true);
+      expect(callable('publishBlossomServerList')).toBe(true);
+      expect(callable('mention')).toBe(true);
+      // the key handling must not be reachable from the browser
+      expect(callable('getSecretKey')).toBe(false);
+      expect(callable('post')).toBe(false);
+    });
+
     it('publishes to the extra relays of the channel', async () => {
       const publish = jest.spyOn(SimplePool.prototype, 'publish');
 
@@ -556,6 +620,15 @@ describe('NostrProvider', () => {
   });
 
   describe('auto repost by other channels', () => {
+    it('builds the link of a note that was connected by hand', async () => {
+      const id = 'd'.repeat(64);
+      const url = await provider.releaseUrl('', id, { internalId: PK } as any);
+      expect(url).toContain('https://primal.net/e/nevent1');
+      expect(
+        await provider.releaseUrl('', 'not-an-id', { internalId: PK } as any)
+      ).toBeUndefined();
+    });
+
     it('is registered as a post plug for nostr channels', () => {
       const plugs = Reflect.getMetadata(
         'custom:internal_plug',

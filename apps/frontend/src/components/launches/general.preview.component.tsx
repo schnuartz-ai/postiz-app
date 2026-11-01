@@ -18,7 +18,7 @@ export const GeneralPreviewComponent: FC<{
   const renderContent = topValue.map((p) => {
     const newContent = stripHtmlValidation(
       'normal',
-      p.content.replace(
+      (p.content || '').replace(
         /<span.*?data-mention-id="([.\s\S]*?)"[.\s\S]*?>([.\s\S]*?)<\/span>/gi,
         (match, match1, match2) => {
           return `[[[${match2}]]]`;
@@ -111,6 +111,7 @@ export const GeneralPreviewComponent: FC<{
                 </div>
               </div>
               <div
+                dir="auto"
                 className={clsx('text-wrap whitespace-pre', 'preview')}
                 dangerouslySetInnerHTML={{
                   __html: value.text,

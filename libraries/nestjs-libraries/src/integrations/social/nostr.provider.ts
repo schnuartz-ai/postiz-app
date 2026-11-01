@@ -5,7 +5,7 @@ import {
   PostResponse,
   SocialProvider,
 } from '@gitroom/nestjs-libraries/integrations/social/social.integrations.interface';
-import { makeId } from '@gitroom/nestjs-libraries/services/make.is';
+import { makeSecureId } from '@gitroom/nestjs-libraries/services/make.secure.id';
 import dayjs from 'dayjs';
 import { SocialAbstract } from '@gitroom/nestjs-libraries/integrations/social.abstract';
 import {
@@ -22,8 +22,8 @@ import WebSocket from 'ws';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { Integration } from '@prisma/client';
 import { PostPlug } from '@gitroom/helpers/decorators/post.plug';
+import { DashboardFunction } from '@gitroom/nestjs-libraries/integrations/dashboard.function.decorator';
 import { Plug } from '@gitroom/helpers/decorators/plug.decorator';
-import { readOrFetch } from '@gitroom/helpers/utils/read.or.fetch';
 import { isSafePublicHttpsUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 import { ssrfSafeDispatcher } from '@gitroom/nestjs-libraries/dtos/webhooks/ssrf.safe.dispatcher';
 import {
@@ -33,6 +33,7 @@ import {
   mirrorToBlossom,
   normalizeBlossomServer,
   parseNostrSecretKey,
+  spoolStream,
   uploadToBlossom,
 } from '@gitroom/nestjs-libraries/upload/blossom.client';
 import {
@@ -81,6 +82,17 @@ const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
       timer = setTimeout(() => reject(new Error('timeout')), ms);
     }),
   ]).finally(() => clearTimeout(timer)) as Promise<T>;
+};
+
+// Up to this size a file is read into memory, bigger ones (videos) are
+// streamed to a temp file so a 1 GB video never sits in memory.
+const LARGE_MEDIA_BYTES = 25 * 1024 * 1024;
+
+type MediaSource = {
+  data?: Buffer;
+  file?: { path: string; sha256: string; size: number };
+  mime?: string;
+  cleanup?: () => Promise<void>;
 };
 
 type HostedMedia = {
@@ -149,10 +161,10 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
   }
 
   async generateAuthUrl() {
-    const state = makeId(17);
+    const state = makeSecureId(17);
     return {
       url: state,
-      codeVerifier: makeId(10),
+      codeVerifier: makeSecureId(10),
       state,
     };
   }
@@ -311,75 +323,118 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
         continue;
       }
 
-      let data: Buffer | undefined;
-      let main: Pick<BlossomDescriptor, 'url' | 'sha256'> & {
-        type?: string;
-        size?: number;
-      };
-      let backups: string[];
-
       const onPrimary = this.sameHost(publicUrl, servers[0]);
       const hashInUrl = publicUrl.match(/[0-9a-f]{64}/i)?.[0]?.toLowerCase();
 
       if (onPrimary && hashInUrl) {
         // already there (e.g. STORAGE_PROVIDER=blossom), only the backups are left
-        main = { url: publicUrl, sha256: hashInUrl };
-        backups = servers.slice(1);
-      } else if (onPrimary) {
-        hosted.push(fallback);
+        await Promise.allSettled(
+          servers
+            .slice(1)
+            .map((server) =>
+              this.mirror(server, secretKey, publicUrl, hashInUrl)
+            )
+        );
+        hosted.push({ url: publicUrl, sha256: hashInUrl, alt: m.alt });
         continue;
-      } else {
-        try {
-          data = Buffer.from(await readOrFetch(m.path || publicUrl));
-        } catch (err) {
-          console.warn(
-            `Nostr: could not read media, keeping original url (${
-              (err as Error)?.message
-            })`
-          );
-          hosted.push(fallback);
-          continue;
-        }
-
-        let uploaded: BlossomDescriptor | undefined;
-        let used = -1;
-        for (const [index, server] of servers.entries()) {
-          try {
-            uploaded = await uploadToBlossom({ server, secretKey, data });
-            used = index;
-            break;
-          } catch (err) {
-            console.warn(
-              `Nostr: Blossom upload failed (${(err as Error)?.message})`
-            );
-          }
-        }
-
-        if (!uploaded) {
-          hosted.push(fallback);
-          continue;
-        }
-
-        main = uploaded;
-        backups = servers.slice(used + 1);
       }
 
-      await Promise.allSettled(
-        backups.map((server) =>
-          this.mirror(server, secretKey, main.url, main.sha256, data)
-        )
-      );
+      if (onPrimary) {
+        hosted.push(fallback);
+        continue;
+      }
 
-      hosted.push({
-        url: main.url,
-        mime: main.type,
-        sha256: main.sha256,
-        size: main.size,
-        alt: m.alt,
-      });
+      let source: MediaSource | undefined;
+      try {
+        source = await this.loadMedia(m.path || publicUrl);
+        hosted.push(
+          (await this.uploadEverywhere(source, secretKey, servers, m.alt)) ||
+            fallback
+        );
+      } catch (err) {
+        console.warn(
+          `Nostr: could not move media to Blossom, keeping original url (${
+            (err as Error)?.message
+          })`
+        );
+        hosted.push(fallback);
+      } finally {
+        await source?.cleanup?.();
+      }
     }
 
     return hosted;
+  }
+
+  /** Small files are read into memory, big ones go through a temp file. */
+  private async loadMedia(path: string): Promise<MediaSource> {
+    const size = await this.mediaSize(path).catch(() => 0);
+
+    if (size > LARGE_MEDIA_BYTES) {
+      const spooled = await spoolStream(await this.mediaStream(path));
+      return { file: spooled, mime: spooled.mime, cleanup: spooled.cleanup };
+    }
+
+    return { data: await this.readOrFetch(path) };
+  }
+
+  private uploadSource(
+    server: string,
+    secretKey: Uint8Array,
+    source: MediaSource
+  ) {
+    return uploadToBlossom({
+      server,
+      secretKey,
+      data: source.data,
+      file: source.file,
+      mime: source.mime,
+    });
+  }
+
+  /** First server that works is linked, the ones after it get a backup. */
+  private async uploadEverywhere(
+    source: MediaSource,
+    secretKey: Uint8Array,
+    servers: string[],
+    alt?: string
+  ): Promise<HostedMedia | undefined> {
+    for (const [index, server] of servers.entries()) {
+      let uploaded: BlossomDescriptor;
+      try {
+        uploaded = await this.uploadSource(server, secretKey, source);
+      } catch (err) {
+        console.warn(
+          `Nostr: Blossom upload failed (${(err as Error)?.message})`
+        );
+        continue;
+      }
+
+      // servers before this one already failed, they are not asked again
+      await Promise.allSettled(
+        servers
+          .slice(index + 1)
+          .map((backup) =>
+            this.mirror(
+              backup,
+              secretKey,
+              uploaded.url,
+              uploaded.sha256,
+              source
+            )
+          )
+      );
+
+      return {
+        url: uploaded.url,
+        mime: uploaded.type,
+        sha256: uploaded.sha256,
+        size: uploaded.size,
+        alt,
+      };
+    }
+
+    return undefined;
   }
 
   private sameHost(url: string, server: string) {
@@ -396,7 +451,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     secretKey: Uint8Array,
     sourceUrl: string,
     sha256: string,
-    data?: Buffer
+    source?: MediaSource
   ) {
     const result = await mirrorToBlossom({
       server,
@@ -413,9 +468,9 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     const retryable =
       !result.status || [400, 404, 405, 501, 502].includes(result.status);
 
-    if (data && retryable) {
+    if (source && retryable) {
       try {
-        await uploadToBlossom({ server, secretKey, data });
+        await this.uploadSource(server, secretKey, source);
         return;
       } catch (err) {
         console.warn(
@@ -502,7 +557,23 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     return { content, tags: [...imeta, ...this.referenceTags(content)] };
   }
 
-  private releaseUrl(eventId: string, pubkey: string, relay?: string) {
+  /** Link for a note that was connected by hand (SocialProvider.releaseUrl). */
+  async releaseUrl(
+    accessToken: string,
+    releaseId: string,
+    integration: Integration
+  ): Promise<string | undefined> {
+    try {
+      return this.noteUrl(
+        releaseId.trim().toLowerCase(),
+        integration.internalId
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  private noteUrl(eventId: string, pubkey: string, relay?: string) {
     return `https://primal.net/e/${nip19.neventEncode({
       id: eventId,
       author: pubkey,
@@ -581,7 +652,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
       {
         id: firstPost.id,
         postId: eventId,
-        releaseURL: this.releaseUrl(eventId, id, relays[0]),
+        releaseURL: this.noteUrl(eventId, id, relays[0]),
         status: 'completed',
       },
     ];
@@ -630,7 +701,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
       {
         id: commentPost.id,
         postId: eventId,
-        releaseURL: this.releaseUrl(eventId, id, relays[0]),
+        releaseURL: this.noteUrl(eventId, id, relays[0]),
         status: 'completed',
       },
     ];
@@ -642,6 +713,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
   // ---------------------------------------------------------------------------
 
   /** "Test" button: would this server take an upload from the channel's key? */
+  @DashboardFunction()
   async testBlossomServer(
     token: string,
     data: { server: string },
@@ -673,6 +745,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
    * kind 10063 list (BUD-03), so other apps find the backup copies when a link
    * to the first server stops working.
    */
+  @DashboardFunction()
   async publishBlossomServerList(
     token: string,
     data: unknown,
@@ -965,7 +1038,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
           DEFAULT_PRIMAL_CACHE,
         ])[0];
         ws = new WebSocket(url);
-        const subscription = makeId(10);
+        const subscription = makeSecureId(10);
 
         ws.on('open', () =>
           ws!.send(

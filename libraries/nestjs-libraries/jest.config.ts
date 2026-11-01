@@ -28,6 +28,8 @@ export default {
   // nostr-tools depends on ESM only packages (@noble/*, @scure/*)
   transformIgnorePatterns: ['/node_modules/(?!.*(?:@noble|@scure))'],
   moduleNameMapper: {
+    '^file-type$':
+      '<rootDir>/libraries/nestjs-libraries/jest.stubs/file-type.ts',
     '^@gitroom/nestjs-libraries/(.*)$':
       '<rootDir>/libraries/nestjs-libraries/src/$1',
     '^@gitroom/helpers/(.*)$': '<rootDir>/libraries/helpers/src/$1',
