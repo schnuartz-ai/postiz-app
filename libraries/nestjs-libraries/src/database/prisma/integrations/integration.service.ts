@@ -649,6 +649,13 @@ export class IntegrationService {
     if (!getIntegration || !originalIntegration) {
       return;
     }
+    if (['x-add-comment', 'nostr-add-comment'].includes(data.plugName) &&
+        (getIntegration.deletedAt || getIntegration.disabled || originalIntegration.deletedAt ||
+          getIntegration.id === originalIntegration.id ||
+          getIntegration.providerIdentifier !== originalIntegration.providerIdentifier ||
+          data.plugName !== `${getIntegration.providerIdentifier}-add-comment`)) {
+      return;
+    }
 
     const getAllInternalPlugs = this._integrationManager
       .getInternalPlugs(getIntegration.providerIdentifier)

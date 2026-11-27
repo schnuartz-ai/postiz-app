@@ -1,6 +1,12 @@
-import { getRepostMode, getQuoteTargets, isRepostPlug, quoteCharacterLimit, quoteLengthStatus, sameQuoteCustomer } from '@gitroom/helpers/utils/repost.mode';
+import { getRepostMode, getQuoteTargets, isRepostPlug, isCommentPlug, quoteCharacterLimit, quoteLengthStatus, sameQuoteCustomer } from '@gitroom/helpers/utils/repost.mode';
 
 describe('repost settings', () => {
+  it('only enables scheduled comment targets on X and Nostr', () => {
+    expect(isCommentPlug('x-add-comment')).toBe(true);
+    expect(isCommentPlug('nostr-add-comment')).toBe(true);
+    expect(isCommentPlug('linkedin-add-comment')).toBe(false);
+  });
+
   it('uses the lowest selected account limit and X weighted character counting', () => {
     const nostr = { identifier: 'nostr' };
     const x = { identifier: 'x' };

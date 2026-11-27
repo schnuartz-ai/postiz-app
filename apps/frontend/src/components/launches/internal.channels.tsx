@@ -1,6 +1,6 @@
 import { FC, useEffect, useRef, useState } from 'react';
 import SafeImage from '@gitroom/react/helpers/safe.image';
-import { getRepostMode, getQuoteTargets, isRepostPlug, RepostMode, QuoteTarget, quoteCharacterLimit, quoteLengthStatus, sameQuoteCustomer } from '@gitroom/helpers/utils/repost.mode';
+import { getRepostMode, getQuoteTargets, isRepostPlug, isCommentPlug, RepostMode, QuoteTarget, quoteCharacterLimit, quoteLengthStatus, sameQuoteCustomer } from '@gitroom/helpers/utils/repost.mode';
 import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import {
   Integrations,
@@ -115,12 +115,15 @@ type LinkedQuoteOption = {
 const QuoteEditor: FC<{
   account: Integrations;
   initialText: string;
+  comment?: boolean;
   linkedAccounts: LinkedQuoteOption[];
   onSave: (text: string, selected: string[]) => void;
   onRemove: () => void;
   onClose: () => void;
-}> = ({ account, initialText, linkedAccounts, onSave, onRemove, onClose }) => {
+}> = ({ account, initialText, comment = false, linkedAccounts, onSave, onRemove, onClose }) => {
   const t = useT();
+  const title = comment ? t('scheduled_comment', 'Scheduled comment') : t('quote_repost', 'Quoted repost');
+  const textLabel = comment ? t('comment_text', 'Comment text') : t('quote_repost_text', 'Quote text');
   const dialog = useRef<HTMLDialogElement>(null);
   const [text, setText] = useState(initialText);
   const [selected, setSelected] = useState(() => linkedAccounts.filter((item) => item.selected).map((item) => item.key));
@@ -136,7 +139,7 @@ const QuoteEditor: FC<{
   return (
     <dialog
       ref={dialog}
-      aria-label={t('quote_repost', 'Quoted repost') + ': ' + account.name}
+      aria-label={title + ': ' + account.name}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -146,12 +149,12 @@ const QuoteEditor: FC<{
       <div className="flex flex-col gap-[12px]">
         <div className="flex items-center gap-[8px] font-semibold">
           <SafeImage src={account.picture || '/no-picture.jpg'} alt="" width={32} height={32} className="rounded-full" />
-          <span>{t('quote_repost', 'Quoted repost')} · {account.name}</span>
+          <span>{title} · {account.name}</span>
         </div>
         <textarea
           autoFocus
-          aria-label={t('quote_repost_text', 'Quote text')}
-          placeholder={t('quote_repost_text', 'Quote text')}
+          aria-label={textLabel}
+          placeholder={textLabel}
           value={text}
           onChange={(event) => setText(event.target.value)}
           rows={5}
@@ -160,7 +163,7 @@ const QuoteEditor: FC<{
         <div className={clsx('text-end text-[12px]', !status.valid && 'text-red-400')} aria-live="polite">
           {status.count} / {status.limit} · {status.identifier === 'x' ? 'X' : 'Nostr'}
         </div>
-        {!linkedAccounts.length && !!account.customer?.id && (
+        {!comment && !linkedAccounts.length && !!account.customer?.id && (
           <div className="text-[12px] opacity-70">{t('linked_quote_no_accounts', 'No matching account on another selected original channel. Select the corresponding original X or Nostr channel to link quotes.')}</div>
         )}
         {!!linkedAccounts.length && (
@@ -228,8 +231,9 @@ const Plug: FC<{
   const val = watch(`plug--${plug.identifier}--integrations`);
   const active = watch(`plug--${plug.identifier}--active`);
   const supportsQuotes = isRepostPlug(plug.identifier);
+  const supportsComments = isCommentPlug(plug.identifier);
   const modeName = `plug--${plug.identifier}--mode`;
-  const quoteName = `plug--${plug.identifier}--quoteIntegrations`;
+  const quoteName = `plug--${plug.identifier}--${supportsComments ? 'commentIntegrations' : 'quoteIntegrations'}`;
   const mode = getRepostMode(active, watch(modeName));
   const quoteTargets = getQuoteTargets(watch(quoteName));
   const [editingAccount, setEditingAccount] = useState<Integrations | null>(null);
@@ -244,7 +248,7 @@ const Plug: FC<{
   const currentTarget = quoteTargets.find((target) => target.id === editingAccount?.id);
   const linkId = currentTarget?.linkId;
   const linkedAccounts: LinkedQuoteOption[] = [];
-  if (editingAccount && integration && editingAccount.customer?.id) {
+  if (supportsQuotes && editingAccount && integration && editingAccount.customer?.id) {
     for (const source of sources) {
       const original = source.integration;
       if (!['x', 'nostr'].includes(original.identifier) || original.disabled || original.inBetweenSteps) continue;
@@ -277,6 +281,12 @@ const Plug: FC<{
 
   const updateLinkedQuote = (text: string, selectedKeys: string[]) => {
     if (!editingAccount || !integration) return;
+    if (supportsComments) {
+      const remaining = getSourceTargets(integration.id).filter((target) => target.id !== editingAccount.id);
+      saveQuoteTargets(text ? [...remaining, { id: editingAccount.id, quoteText: text }] : remaining);
+      setEditingAccount(null);
+      return;
+    }
     const selected = linkedAccounts.filter((item) => !item.conflict && selectedKeys.includes(item.key));
     const group = selected.length ? linkId || JSON.stringify([integration.id, editingAccount.id]) : undefined;
     const updates = new Map<string, QuoteTarget[]>();
@@ -412,7 +422,7 @@ const Plug: FC<{
             <div>
               {t('accounts_that_will_engage', 'Accounts that will engage:')}
             </div>
-            {supportsQuotes && mode === 'quote' ? (
+            {(supportsQuotes && mode === 'quote') || supportsComments ? (
               <>
                 <div className="flex flex-wrap gap-[8px]">
                   {allowedIntegrations.filter((account) => !account.inBetweenSteps && !account.disabled).map((account) => {
@@ -421,7 +431,7 @@ const Plug: FC<{
                       <button
                         type="button"
                         key={account.id}
-                        aria-label={account.name + ': ' + (selected ? t('edit_quote', 'Edit quote') : t('add_quote', 'Add quote'))}
+                        aria-label={account.name + ': ' + (supportsComments ? (selected ? t('edit_comment', 'Edit comment') : t('add_comment', 'Add comment')) : (selected ? t('edit_quote', 'Edit quote') : t('add_quote', 'Add quote')))}
                         aria-pressed={!!selected}
                         onClick={() => setEditingAccount(account)}
                         className={clsx(
@@ -432,7 +442,7 @@ const Plug: FC<{
                         <SafeImage src={account.picture || '/no-picture.jpg'} alt="" width={28} height={28} className="rounded-full" />
                         <div className="text-start min-w-0">
                           <div className="truncate">{account.name}{selected?.linkId ? ' · ' + t('quote_linked', 'Linked') : ''}</div>
-                          <div className="truncate opacity-70 max-w-[160px]">{selected?.quoteText || t('add_quote', 'Add quote')}</div>
+                          <div className="truncate opacity-70 max-w-[160px]">{selected?.quoteText || (supportsComments ? t('add_comment', 'Add comment') : t('add_quote', 'Add quote'))}</div>
                         </div>
                       </button>
                     );
@@ -442,6 +452,7 @@ const Plug: FC<{
                   <QuoteEditor
                     key={editingAccount.id}
                     account={editingAccount}
+                    comment={supportsComments}
                     initialText={currentTarget?.quoteText || ''}
                     linkedAccounts={linkedAccounts}
                     onClose={() => setEditingAccount(null)}

@@ -350,6 +350,33 @@ export class XProvider extends SocialAbstract implements SocialProvider {
   }
 
   @PostPlug({
+    identifier: 'x-add-comment',
+    title: 'Add comments by a different account',
+    description: 'Schedule comments from other X accounts on your post',
+    pickIntegration: ['x'],
+    fields: [],
+  })
+  async addScheduledComment(
+    integration: Integration,
+    originalIntegration: Integration,
+    postId: string,
+    information: any
+  ) {
+    const text = typeof information?.comment === 'string' ? information.comment.trim() : '';
+    const status = quoteLengthStatus(text, [{ identifier: 'x', additionalSettings: integration.additionalSettings }]);
+    if (!text || !status.valid || !/^\d+$/.test(postId)) {
+      throw new BadBody(this.identifier, '{}', Buffer.from('{}'), 'Invalid scheduled comment');
+    }
+    const client = await this.getClient(integration.token);
+    // A reply is a non-idempotent create. Never retry an ambiguous API result.
+    try {
+      await client.v2.tweet({ text, reply: { in_reply_to_tweet_id: postId } });
+    } catch {
+      throw new BadBody(this.identifier, '{}', Buffer.from('{}'), 'X comment could not be confirmed; check the account before retrying');
+    }
+  }
+
+  @PostPlug({
     identifier: 'x-repost-post-users',
     title: 'Add Re-posters',
     description: 'Add accounts to repost your post',

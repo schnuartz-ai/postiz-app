@@ -708,11 +708,37 @@ describe('NostrProvider', () => {
       );
       expect(plugs).toEqual([
         expect.objectContaining({
+          identifier: 'nostr-add-comment',
+          pickIntegration: ['nostr'],
+          methodName: 'addScheduledComment',
+        }),
+        expect.objectContaining({
           identifier: 'nostr-repost-post-users',
           pickIntegration: ['nostr'],
           methodName: 'repostPostUsers',
         }),
       ]);
+    });
+
+    it('publishes a scheduled reply signed by the commenting account, not the original author', async () => {
+      const originalId = 'd'.repeat(64);
+      await provider.addScheduledComment(
+        { token, internalId: PK } as any,
+        { internalId: FRIEND_PK } as any,
+        originalId,
+        { comment: 'A scheduled reply' }
+      );
+      expect(published).toHaveLength(1);
+      const reply = published[0];
+      expect(reply.kind).toBe(1);
+      expect(reply.pubkey).toBe(PK);
+      expect(reply.content).toBe('A scheduled reply');
+      expect(reply.tags.some((tag) => tag[0] === 'e' && tag[1] === originalId && tag[3] === 'root' && tag[4] === FRIEND_PK)).toBe(true);
+      expect(reply.tags).toContainEqual(['p', FRIEND_PK]);
+      expect(verifyEvent(reply)).toBe(true);
+      jest.spyOn(SimplePool.prototype, 'querySync').mockResolvedValue([reply]);
+      await provider.addScheduledComment({ token, internalId: PK } as any, { internalId: FRIEND_PK } as any, originalId, { comment: 'A scheduled reply' });
+      expect(published).toHaveLength(1);
     });
 
     it('publishes a signed kind 1 quote with the selected account text and NIP-27 reference', async () => {

@@ -1,4 +1,4 @@
-import { getRepostMode, getQuoteTargets, isRepostPlug, quoteLengthStatus } from '@gitroom/helpers/utils/repost.mode';
+import { getRepostMode, getQuoteTargets, isRepostPlug, isCommentPlug, quoteLengthStatus } from '@gitroom/helpers/utils/repost.mode';
 import {
   BadRequestException,
   Injectable,
@@ -846,6 +846,7 @@ export class PostsService {
       name: string;
       integrations: { id: string }[];
       quoteIntegrations?: unknown;
+      commentIntegrations?: unknown;
       mode?: unknown;
       delay: string;
       active: boolean;
@@ -853,13 +854,15 @@ export class PostsService {
 
     return (list || []).flatMap((trigger) => {
       const repost = isRepostPlug(trigger.name);
+      const comment = isCommentPlug(trigger.name);
+      if (comment && (trigger.active !== true || trigger.name !== `${integration.providerIdentifier}-add-comment`)) return [];
       const mode = repost ? getRepostMode(trigger.active, trigger.mode) : undefined;
       if (repost && (mode === 'off' || trigger.name !== `${integration.providerIdentifier}-repost-post-users`)) {
         return [];
       }
       const targets: { id: string; quoteText?: string }[] =
-        mode === 'quote' ? getQuoteTargets(trigger.quoteIntegrations) : trigger.integrations || [];
-      return targets.filter((int) => int && typeof int.id === 'string' && (!repost || int.id !== integration.id)).map((int) => ({
+        comment ? getQuoteTargets(trigger.commentIntegrations) : mode === 'quote' ? getQuoteTargets(trigger.quoteIntegrations) : Array.isArray(trigger.integrations) ? trigger.integrations : [];
+      return targets.filter((int) => int && typeof int.id === 'string' && (!(repost || comment) || int.id !== integration.id)).map((int) => ({
         type: 'internal-plug',
         post: id,
         originalIntegration: integration.id,
@@ -867,7 +870,7 @@ export class PostsService {
         plugName: trigger.name,
         orgId: orgId,
         delay: +trigger.delay || 0,
-        information: repost ? { mode, ...(mode === 'quote' ? { quoteText: int.quoteText } : {}) } : trigger,
+        information: comment ? { comment: int.quoteText } : repost ? { mode, ...(mode === 'quote' ? { quoteText: int.quoteText } : {}) } : trigger,
       }));
     });
   }
@@ -1094,6 +1097,26 @@ export class PostsService {
             if (!status.valid) {
               valid = false;
               settingsError = `${account.name}: Quote text exceeds ${status.limit} characters`;
+              break;
+            }
+          }
+        }
+
+        const commentPlug = `${integration.providerIdentifier}-add-comment`;
+        const commentPrefix = `plug--${commentPlug}--`;
+        if (isCommentPlug(commentPlug) && settings[commentPrefix + 'active'] === true) {
+          for (const target of getQuoteTargets(settings[commentPrefix + 'commentIntegrations'])) {
+            const account = await this._integrationService.getIntegrationById(orgId, target.id);
+            if (!account || account.id === integration.id || account.deletedAt || account.disabled ||
+                account.providerIdentifier !== integration.providerIdentifier) {
+              valid = false;
+              settingsError = 'A scheduled comment account is no longer available';
+              break;
+            }
+            const status = quoteLengthStatus(target.quoteText, [{ identifier: account.providerIdentifier, additionalSettings: account.additionalSettings }]);
+            if (!status.valid) {
+              valid = false;
+              settingsError = `${account.name}: Comment exceeds ${status.limit} characters`;
               break;
             }
           }
