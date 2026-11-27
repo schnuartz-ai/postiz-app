@@ -1,3 +1,4 @@
+import { resolveScheduledDelay } from '@gitroom/helpers/utils/scheduled.delay';
 import { getRepostMode, getQuoteTargets, isRepostPlug, isCommentPlug, quoteLengthStatus } from '@gitroom/helpers/utils/repost.mode';
 import {
   BadRequestException,
@@ -869,7 +870,7 @@ export class PostsService {
         integration: int.id,
         plugName: trigger.name,
         orgId: orgId,
-        delay: +trigger.delay || 0,
+        delay: resolveScheduledDelay(trigger.delay, 1),
         information: comment ? { comment: int.quoteText } : repost ? { mode, ...(mode === 'quote' ? { quoteText: int.quoteText } : {}) } : trigger,
       }));
     });

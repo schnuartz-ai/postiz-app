@@ -69,6 +69,7 @@ import {
   DelayIcon,
 } from '@gitroom/frontend/components/ui/icons';
 import { DelayComponent } from '@gitroom/frontend/components/new-launch/delay.component';
+import { DEFAULT_SCHEDULED_DELAY } from '@gitroom/helpers/utils/scheduled.delay';
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 
@@ -253,7 +254,7 @@ export const EditorWrapper: FC<{
       const newValue = value.map((p, index) => {
         return {
           id: makeId(10),
-          delay: 0,
+          delay: index === 0 ? 0 : (items?.[index]?.delay ?? DEFAULT_SCHEDULED_DELAY),
           ...(items?.[index]?.media
             ? { media: items[index].media }
             : { media: [] }),
@@ -366,7 +367,7 @@ export const EditorWrapper: FC<{
       if (internal) {
         return addInternalValue(index, current, [
           {
-            delay: 0,
+            delay: DEFAULT_SCHEDULED_DELAY,
             content: '',
             id: makeId(10),
             media: [],
@@ -376,7 +377,7 @@ export const EditorWrapper: FC<{
 
       return addGlobalValue(index, [
         {
-          delay: 0,
+          delay: DEFAULT_SCHEDULED_DELAY,
           content: '',
           id: makeId(10),
           media: [],

@@ -15,15 +15,13 @@ import { Textarea } from '@gitroom/react/form/textarea';
 import { useSettings } from '@gitroom/frontend/components/launches/helpers/use.values';
 import clsx from 'clsx';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { DEFAULT_SCHEDULED_DELAY, RANDOM_DELAY_OPTIONS, MINUTE_MS } from '@gitroom/helpers/utils/scheduled.delay';
+
 const delayOptions = [
-  {
-    name: 'Immediately',
-    value: 0,
-  },
-  {
-    name: '1 hour',
-    value: 3600000,
-  },
+  { name: 'Immediately', value: 0 },
+  { name: RANDOM_DELAY_OPTIONS[0].label, value: RANDOM_DELAY_OPTIONS[0].value },
+  { name: '1 hour', value: 60 * MINUTE_MS },
+  { name: RANDOM_DELAY_OPTIONS[1].label, value: RANDOM_DELAY_OPTIONS[1].value },
   {
     name: '2 hours',
     value: 7200000,
@@ -228,6 +226,13 @@ const Plug: FC<{
 
   const { watch, setValue, getValues, register } = useSettings();
   const [load, setLoad] = useState(false);
+  const delayName = `plug--${plug.identifier}--delay`;
+  const configuredDelay = watch(delayName);
+  useEffect(() => {
+    if (getValues(delayName) == null || getValues(delayName) === '') {
+      setValue(delayName, String(DEFAULT_SCHEDULED_DELAY));
+    }
+  }, [delayName, getValues, setValue]);
   const val = watch(`plug--${plug.identifier}--integrations`);
   const active = watch(`plug--${plug.identifier}--active`);
   const supportsQuotes = isRepostPlug(plug.identifier);
@@ -400,7 +405,10 @@ const Plug: FC<{
             <Select
               label="Delay"
               hideErrors={true}
-              {...register(`plug--${plug.identifier}--delay`)}
+              name={delayName}
+              disableForm={true}
+              value={configuredDelay ?? String(DEFAULT_SCHEDULED_DELAY)}
+              onChange={(event) => setValue(delayName, event.target.value, { shouldDirty: true })}
             >
               {delayOptions.map((p) => (
                 <option key={p.name} value={p.value}>
