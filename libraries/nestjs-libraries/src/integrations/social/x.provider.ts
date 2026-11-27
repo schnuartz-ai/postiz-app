@@ -1,4 +1,5 @@
 import { TweetV2, TwitterApi } from 'twitter-api-v2';
+import { quoteLengthStatus } from '@gitroom/helpers/utils/repost.mode';
 import { createHmac, randomBytes } from 'crypto';
 import { parseFragment } from 'parse5';
 import {
@@ -368,6 +369,26 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       accessToken: accessTokenSplit,
       accessSecret: accessSecretSplit,
     });
+
+    if (information?.mode === 'off' || information?.active === false) return;
+    if (information?.mode === 'quote') {
+      const text = typeof information.quoteText === 'string' ? information.quoteText.trim() : '';
+      if (!text) {
+        throw new BadBody(this.identifier, '{}', Buffer.from('{}'), 'Quote text is required');
+      }
+      const status = quoteLengthStatus(text, [{ identifier: 'x', additionalSettings: integration.additionalSettings }]);
+      if (!status.valid) {
+        throw new BadBody(this.identifier, '{}', Buffer.from('{}'), `Quote text exceeds ${status.limit} characters`);
+      }
+      // Creating a quote is not idempotent. Do not retry an ambiguous API
+      // failure as a normal repost or another create.
+      try {
+        await client.v2.tweet({ text, quote_tweet_id: postId });
+      } catch {
+        throw new BadBody(this.identifier, '{}', Buffer.from('{}'), 'X quote could not be confirmed; check the account before retrying');
+      }
+      return;
+    }
 
     const {
       data: { id },

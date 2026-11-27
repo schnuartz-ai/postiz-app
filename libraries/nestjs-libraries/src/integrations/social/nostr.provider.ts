@@ -792,6 +792,40 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     postId: string,
     information: any
   ) {
+    if (information?.mode === 'off' || information?.active === false) return;
+
+    if (information?.mode === 'quote') {
+      const text = typeof information.quoteText === 'string' ? information.quoteText.trim() : '';
+      if (!text || text.length > this.maxLength() || !/^[a-f0-9]{64}$/i.test(postId)) {
+        throw new Error('Quote text and a valid Nostr event ID are required');
+      }
+      const relays = await this.relaysFor(integration);
+      const originalRelays = await this.relaysFor(originalIntegration);
+      const reference = nip19.neventEncode({
+        id: postId,
+        author: originalIntegration.internalId,
+        relays: originalRelays.slice(0, 1),
+      });
+      const content = `${text}\n\nnostr:${reference}`;
+      // Kind 1 + NIP-27 quote reference, rather than a kind 6 repost.
+      // Check for an identical quote on retries before creating another note.
+      const existing = await pool.querySync(relays, {
+        kinds: [1],
+        authors: [integration.internalId],
+        '#q': [postId],
+        limit: 50,
+      });
+      if (existing.some((event) => event.content === content)) return;
+      const event = finalizeEvent({
+        kind: 1,
+        content,
+        tags: this.referenceTags(content),
+        created_at: Math.floor(Date.now() / 1000),
+      }, this.getSecretKey(integration.token));
+      await this.publishEvent(relays, event);
+      return;
+    }
+
     // the original note was just published, give the relays a moment
     const lookupRelays = Array.from(
       new Set([

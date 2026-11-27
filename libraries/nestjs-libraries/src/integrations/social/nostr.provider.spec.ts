@@ -715,6 +715,39 @@ describe('NostrProvider', () => {
       ]);
     });
 
+    it('publishes a signed kind 1 quote with the selected account text and NIP-27 reference', async () => {
+      const originalId = 'd'.repeat(64);
+      await provider.repostPostUsers(
+        { token, internalId: PK } as any,
+        { internalId: FRIEND_PK } as any,
+        originalId,
+        { mode: 'quote', quoteText: 'My own comment' }
+      );
+      expect(published).toHaveLength(1);
+      const quote = published[0];
+      expect(quote.kind).toBe(1);
+      expect(quote.pubkey).toBe(PK);
+      expect(quote.content).toContain('My own comment\n\nnostr:nevent1');
+      expect(quote.tags.some((tag) => tag[0] === 'q' && tag[1] === originalId)).toBe(true);
+      expect(verifyEvent(quote)).toBe(true);
+      jest.spyOn(SimplePool.prototype, 'querySync').mockResolvedValue([quote]);
+      await provider.repostPostUsers(
+        { token, internalId: PK } as any,
+        { internalId: FRIEND_PK } as any,
+        originalId,
+        { mode: 'quote', quoteText: 'My own comment' }
+      );
+      expect(published).toHaveLength(1);
+    });
+
+    it('does not silently turn an empty quote or disabled action into a repost', async () => {
+      const account = { token, internalId: PK } as any;
+      const original = { internalId: FRIEND_PK } as any;
+      await expect(provider.repostPostUsers(account, original, 'd'.repeat(64), { mode: 'quote', quoteText: ' ' })).rejects.toThrow();
+      await provider.repostPostUsers(account, original, 'd'.repeat(64), { mode: 'off' });
+      expect(published).toHaveLength(0);
+    });
+
     it('publishes a kind 6 repost (NIP-18) of the original note', async () => {
       const authorSk = Uint8Array.from(Array(32).fill(9));
       const original = finalizeEvent(

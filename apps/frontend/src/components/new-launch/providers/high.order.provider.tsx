@@ -233,6 +233,17 @@ export const withProvider = function <T extends object>(params: {
             settings: form.getValues(),
           };
         },
+        setQuoteSettings: (targets: unknown, activate: boolean, delay: unknown) => {
+          const prefix = `plug--${selectedIntegration.integration.identifier}-repost-post-users--`;
+          form.setValue(prefix + 'quoteIntegrations', targets, { shouldDirty: true });
+          if (activate) {
+            form.setValue(prefix + 'mode', 'quote', { shouldDirty: true });
+            form.setValue(prefix + 'active', true, { shouldDirty: true });
+            if (form.getValues(prefix + 'delay') == null) {
+              form.setValue(prefix + 'delay', delay ?? '0', { shouldDirty: true });
+            }
+          }
+        },
         trigger: () => {
           return form.trigger();
         },
