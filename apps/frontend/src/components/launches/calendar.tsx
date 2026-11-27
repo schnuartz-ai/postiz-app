@@ -5,7 +5,10 @@ import React, {
   Fragment,
   memo,
   useCallback,
+  useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -14,6 +17,7 @@ import {
   useCalendar,
   useNow,
 } from '@gitroom/frontend/components/launches/calendar.context';
+import { createPortal } from 'react-dom';
 import dayjs from 'dayjs';
 import 'dayjs/locale/en';
 import 'dayjs/locale/he';
@@ -516,9 +520,179 @@ export const DayView = () => {
     </div>
   );
 };
+type WeekSelection = {
+  selected: Set<string>;
+  setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
+  moving: React.MutableRefObject<boolean>;
+};
+
+const WeekSelectionContext = React.createContext<WeekSelection | null>(null);
+
+const canSelectPost = (post: Post, now = Date.now()) =>
+  (post.state === 'QUEUE' || post.state === 'DRAFT') &&
+  !post.intervalInDays &&
+  fromUtc(post.publishDate).valueOf() > now;
+
+type SelectionBox = { left: number; top: number; right: number; bottom: number };
+
+const sameSelection = (a: Set<string>, b: Set<string>) =>
+  a.size === b.size && Array.from(a).every((id) => b.has(id));
+
 export const WeekView = () => {
-  const { startDate, endDate } = useCalendar();
-  const t = useT();
+  const { startDate, selectedChannels, integrations } = useCalendar();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const moving = useRef(false);
+  const grid = useRef<HTMLDivElement>(null);
+  const skipClick = useRef(false);
+  const [box, setBox] = useState<SelectionBox | null>(null);
+  const gesture = useRef<{
+    pointerId: number;
+    x: number;
+    y: number;
+    clientX: number;
+    clientY: number;
+    startClientX: number;
+    startClientY: number;
+    base: Set<string>;
+    active: boolean;
+    hadSelection: boolean;
+  } | null>(null);
+  const selection = useMemo(() => ({ selected, setSelected, moving }), [selected]);
+
+  useEffect(() => {
+    setSelected(new Set());
+    gesture.current = null;
+    setBox(null);
+  }, [startDate, selectedChannels, integrations]);
+
+  const updateSelection = useCallback(() => {
+    const el = grid.current;
+    const g = gesture.current;
+    if (!el || !g?.active) return;
+    const bounds = el.getBoundingClientRect();
+    const x = Math.max(0, Math.min(el.scrollWidth, g.clientX - bounds.left + el.scrollLeft));
+    const y = Math.max(0, Math.min(el.scrollHeight, g.clientY - bounds.top + el.scrollTop));
+    const left = Math.min(g.x, x);
+    const top = Math.min(g.y, y);
+    const right = Math.max(g.x, x);
+    const bottom = Math.max(g.y, y);
+    const next = new Set(g.base);
+
+    el.querySelectorAll<HTMLElement>('[data-calendar-selectable]').forEach((card) => {
+      const r = card.getBoundingClientRect();
+      const cx = r.left - bounds.left + el.scrollLeft;
+      const cy = r.top - bounds.top + el.scrollTop;
+      if (cx < right && cx + r.width > left && cy < bottom && cy + r.height > top) {
+        next.add(card.dataset.calendarSelectable!);
+      }
+    });
+    setSelected((previous) => sameSelection(previous, next) ? previous : next);
+
+    // Clip the overlay to the scrolling viewport and keep the sticky header clear.
+    const visibleLeft = Math.max(bounds.left, bounds.left + left - el.scrollLeft);
+    const visibleTop = Math.max(bounds.top + 66, bounds.top + top - el.scrollTop);
+    const visibleRight = Math.min(bounds.left + el.clientWidth, bounds.left + right - el.scrollLeft);
+    const visibleBottom = Math.min(bounds.top + el.clientHeight, bounds.top + bottom - el.scrollTop);
+    setBox(visibleRight > visibleLeft && visibleBottom > visibleTop
+      ? { left: visibleLeft, top: visibleTop, right: visibleRight, bottom: visibleBottom }
+      : null);
+  }, []);
+
+  useEffect(() => {
+    let frame = 0;
+    const autoScroll = () => {
+      const el = grid.current;
+      const g = gesture.current;
+      if (!el || !g?.active) return;
+      const r = el.getBoundingClientRect();
+      if (g.clientY < r.top + 90) el.scrollTop -= 12;
+      else if (g.clientY > r.bottom - 30) el.scrollTop += 12;
+      if (g.clientX < r.left + 30) el.scrollLeft -= 12;
+      else if (g.clientX > r.right - 30) el.scrollLeft += 12;
+      updateSelection();
+      frame = requestAnimationFrame(autoScroll);
+    };
+    const move = (event: PointerEvent) => {
+      const g = gesture.current;
+      if (!g || event.pointerId !== g.pointerId) return;
+      g.clientX = event.clientX;
+      g.clientY = event.clientY;
+      if (!g.active) {
+        if (Math.hypot(event.clientX - g.startClientX, event.clientY - g.startClientY) < 5) return;
+        g.active = true;
+        skipClick.current = true;
+        frame = requestAnimationFrame(autoScroll);
+      }
+      event.preventDefault();
+      updateSelection();
+    };
+    const finish = (event: PointerEvent) => {
+      const g = gesture.current;
+      if (!g || event.pointerId !== g.pointerId) return;
+      if (g.active) {
+        if (event.type === 'pointerup') {
+          g.clientX = event.clientX;
+          g.clientY = event.clientY;
+          updateSelection();
+        } else {
+          setSelected(g.base);
+        }
+      } else if (g.hadSelection) {
+        setSelected(new Set());
+        skipClick.current = true;
+      }
+      gesture.current = null;
+      cancelAnimationFrame(frame);
+      setBox(null);
+    };
+    const cancel = () => {
+      if (gesture.current?.active) skipClick.current = true;
+      gesture.current = null;
+      cancelAnimationFrame(frame);
+      setBox(null);
+    };
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        cancel();
+        setSelected(new Set());
+      }
+    };
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+    window.addEventListener('blur', cancel);
+    window.addEventListener('keydown', keydown);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      window.removeEventListener('blur', cancel);
+      window.removeEventListener('keydown', keydown);
+    };
+  }, [updateSelection]);
+
+  const startSelection = (event: React.PointerEvent<HTMLDivElement>) => {
+    skipClick.current = false;
+    const el = grid.current;
+    const target = event.target as Element;
+    if (!el || moving.current || event.button !== 0 || event.pointerType !== 'mouse' ||
+      !target.closest('[data-calendar-hour]') ||
+      target.closest('[data-calendar-post], [data-calendar-control], button, a, input')) return;
+    const bounds = el.getBoundingClientRect();
+    gesture.current = {
+      pointerId: event.pointerId,
+      x: event.clientX - bounds.left + el.scrollLeft,
+      y: event.clientY - bounds.top + el.scrollTop,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      base: event.ctrlKey || event.metaKey ? new Set(selected) : new Set(),
+      active: false,
+      hadSelection: selected.size > 0,
+    };
+  };
 
   // Use dayjs to get localized day names
   const localizedDays = useMemo(() => {
@@ -539,9 +713,20 @@ export const WeekView = () => {
   }, [i18next.resolvedLanguage, startDate]);
 
   return (
+    <WeekSelectionContext.Provider value={selection}>
     <div className="flex flex-col text-textColor flex-1">
       <div className="flex-1 relative">
-        <div className="grid [grid-template-columns:136px_repeat(7,_minmax(0,_1fr))] tablet:[grid-template-columns:72px_repeat(7,_minmax(100px,_1fr))] gap-[4px] rounded-[10px] absolute h-full start-0 top-0 w-full overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
+        <div
+          ref={grid}
+          onPointerDownCapture={startSelection}
+          onClickCapture={(event) => {
+            if (skipClick.current && event.detail !== 0) {
+              skipClick.current = false;
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
+          className="select-none grid [grid-template-columns:136px_repeat(7,_minmax(0,_1fr))] tablet:[grid-template-columns:72px_repeat(7,_minmax(100px,_1fr))] gap-[4px] rounded-[10px] absolute h-full start-0 top-0 w-full overflow-auto scrollbar scrollbar-thumb-fifth scrollbar-track-newBgColor">
           <div className="z-10 bg-newTableHeader flex justify-center items-center flex-col h-[62px] rounded-[8px] sticky top-0"></div>
           {localizedDays.map((day, index) => (
             <div
@@ -574,7 +759,7 @@ export const WeekView = () => {
                 <Fragment
                   key={`${startDate}-${day.date.format('YYYY-MM-DD')}-${hour}`}
                 >
-                  <div className="relative">
+                  <div className="relative" data-calendar-hour>
                     <CalendarColumn
                       getDate={day.date.hour(hour).startOf('hour')}
                     />
@@ -586,7 +771,17 @@ export const WeekView = () => {
           <WeekNowLine days={localizedDays.map((day) => day.date)} />
         </div>
       </div>
+      {box && createPortal(
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed z-[40] border border-btnPrimary rounded-[3px]"
+          style={{ left: box.left, top: box.top, width: box.right - box.left, height: box.bottom - box.top,
+            background: 'color-mix(in srgb, var(--new-btn-primary) 18%, transparent)' }}
+        />,
+        document.body
+      )}
     </div>
+    </WeekSelectionContext.Provider>
   );
 };
 export const MonthView = () => {
@@ -774,6 +969,8 @@ export const CalendarColumn: FC<{
   const t = useT();
 
   const { getDate, randomHour } = props;
+  const selection = useContext(WeekSelectionContext);
+  const toaster = useToaster();
   const user = useUser();
   const {
     integrations,
@@ -786,6 +983,8 @@ export const CalendarColumn: FC<{
     signature,
     loading,
     currentHour,
+    startDate,
+    endDate,
   } = useCalendar();
   const modal = useModals();
   const fetch = useFetch();
@@ -828,10 +1027,66 @@ export const CalendarColumn: FC<{
     [getDate, currentHour]
   );
 
+  const groupMoves = (item: { id: string; ids: string[] }) => {
+    if (!selection || selection.moving.current || display !== 'week' || isBeforeNow) return null;
+    const now = Date.now();
+    const anchor = posts.find((p) => p.id === item.id);
+    if (!anchor || !item.ids.includes(item.id)) return null;
+    const delta = getDate.valueOf() - fromUtc(anchor.publishDate).startOf('hour').valueOf();
+    const start = newDayjs(startDate).startOf('day').valueOf();
+    const end = newDayjs(endDate).endOf('day').valueOf();
+    const moves: { id: string; date: dayjs.Dayjs }[] = [];
+    for (const id of item.ids) {
+      const post = posts.find((p) => p.id === id);
+      if (!post || !canSelectPost(post, now)) return null;
+      const date = newDayjs(fromUtc(post.publishDate).valueOf() + delta);
+      if (!date.isValid() || date.valueOf() <= now || date.valueOf() < start || date.valueOf() > end) return null;
+      moves.push({ id, date });
+    }
+    return moves;
+  };
+
   const [{ canDrop }, drop] = useDrop(() => ({
     accept: 'post',
+    canDrop: (item: any) => item.ids ? !!groupMoves(item) : !isBeforeNow && !selection?.moving.current,
     drop: async (item: any) => {
-      if (isBeforeNow) return;
+      if (isBeforeNow || selection?.moving.current) return;
+      if (item.ids && selection) {
+        const moves = groupMoves(item);
+        if (!moves?.length) return;
+        const anchor = posts.find((p) => p.id === item.id);
+        if (getDate.valueOf() === fromUtc(anchor.publishDate).startOf('hour').valueOf()) return;
+        selection.moving.current = true;
+        let completed = 0;
+        try {
+          for (const move of moves) {
+            if (move.date.valueOf() <= Date.now()) throw new Error('Date passed');
+            const result = await Promise.race([
+              fetch(`/posts/${move.id}/date`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                  date: move.date.utc().format('YYYY-MM-DDTHH:mm:ss'),
+                  action: 'schedule',
+                }),
+              }),
+              timer(15000).then(() => { throw new Error('Request timed out'); }),
+            ]);
+            if (!result.ok) throw new Error('Reschedule failed');
+            completed++;
+          }
+          toaster.show(t('calendar_group_moved', 'Selected posts moved successfully'), 'success');
+        } catch {
+          toaster.show(
+            t('calendar_group_move_failed', 'Could not confirm all moves. Check the calendar before retrying.') +
+              ` (${completed}/${moves.length})`, 'warning'
+          );
+        } finally {
+          selection.moving.current = false;
+          selection.setSelected(new Set());
+          reloadCalendarView();
+        }
+        return;
+      }
 
       // Find the post to check its state
       const post = posts.find((p) => p.id === item.id);
@@ -928,7 +1183,7 @@ export const CalendarColumn: FC<{
     collect: (monitor) => ({
       canDrop: isBeforeNow ? false : !!monitor.canDrop() && !!monitor.isOver(),
     }),
-  }), [posts, isBeforeNow]);
+  }), [posts, isBeforeNow, getDate, selection, startDate, endDate, display, fetch, toaster, t, reloadCalendarView, changeDate, modal]);
 
   const addModal = useCallback(async () => {
     const set: any = !sets.length
@@ -1090,6 +1345,7 @@ export const CalendarColumn: FC<{
           {!showAll && postList.length > 3 && (
             <div
               className="text-center hover:underline py-[5px] text-textColor"
+              data-calendar-control
               onClick={showAllFunc}
             >
               <span className={clsx(display === 'month' && 'mobile:hidden')}>
@@ -1105,6 +1361,7 @@ export const CalendarColumn: FC<{
           {showAll && postList.length > 3 && (
             <div
               className="text-center hover:underline py-[5px]"
+              data-calendar-control
               onClick={showLessFunc}
             >
               <span className={clsx(display === 'month' && 'mobile:hidden')}>
@@ -1231,6 +1488,9 @@ const CalendarItem: FC<{
     openPost,
   } = props;
   const { disableXAnalytics } = useVariables();
+  const selection = useContext(WeekSelectionContext);
+  const selectable = !!selection && display === 'week' && canSelectPost(post);
+  const selected = selectable && !!selection?.selected.has(post.id);
   const user = useUser();
   const showCreationMethodBadge =
     user?.impersonate &&
@@ -1242,24 +1502,44 @@ const CalendarItem: FC<{
   const [{ opacity }, dragRef] = useDrag(
     () => ({
       type: 'post',
-      item: {
-        id: post.id,
-        interval: !!post.intervalInDays,
-        date,
+      canDrag: () => !selection?.moving.current,
+      item: () => {
+        if (selection && !selected && selection.selected.size) selection.setSelected(new Set());
+        return {
+          id: post.id,
+          interval: !!post.intervalInDays,
+          date,
+          ...(selected && selection ? { ids: Array.from(selection.selected) } : {}),
+        };
       },
       collect: (monitor) => ({
         opacity: monitor.isDragging() ? 0 : 1,
       }),
     }),
-    []
+    [post.id, post.intervalInDays, date, selection, selected]
   );
   return (
     <div
       // @ts-ignore
       ref={dragRef}
+      data-calendar-post
+      data-calendar-selectable={selectable ? post.id : undefined}
+      onClickCapture={(event) => {
+        if (!selection || !selectable || !(event.ctrlKey || event.metaKey)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (selection.moving.current) return;
+        selection.setSelected((previous) => {
+          const next = new Set(previous);
+          if (next.has(post.id)) next.delete(post.id);
+          else next.add(post.id);
+          return next;
+        });
+      }}
       className={clsx(
         'w-full flex h-full flex-1 flex-col group',
         'relative',
+        selected && 'rounded-[10px] ring-2 ring-btnPrimary',
         state === 'ERROR' && 'rounded-[10px] ring-2 ring-red-500',
         state === 'PUBLISHED' && 'rounded-[10px] ring-2 ring-green-500'
       )}
