@@ -1,4 +1,4 @@
-import { getRepostMode, getQuoteTargets, isRepostPlug } from '@gitroom/helpers/utils/repost.mode';
+import { getRepostMode, getQuoteTargets, isRepostPlug, quoteLengthStatus } from '@gitroom/helpers/utils/repost.mode';
 import {
   BadRequestException,
   Injectable,
@@ -1077,6 +1077,26 @@ export class PostsService {
           );
         } catch (err: any) {
           errors = err?.message || 'Invalid media';
+        }
+
+        const repostPrefix = `plug--${integration.providerIdentifier}-repost-post-users--`;
+        if (isRepostPlug(`${integration.providerIdentifier}-repost-post-users`) &&
+            getRepostMode(settings[repostPrefix + 'active'], settings[repostPrefix + 'mode']) === 'quote') {
+          for (const target of getQuoteTargets(settings[repostPrefix + 'quoteIntegrations'])) {
+            const account = await this._integrationService.getIntegrationById(orgId, target.id);
+            if (!account || account.id === integration.id || account.deletedAt || account.disabled ||
+                account.providerIdentifier !== integration.providerIdentifier) {
+              valid = false;
+              settingsError = 'A quoted repost account is no longer available';
+              break;
+            }
+            const status = quoteLengthStatus(target.quoteText, [{ identifier: account.providerIdentifier, additionalSettings: account.additionalSettings }]);
+            if (!status.valid) {
+              valid = false;
+              settingsError = `${account.name}: Quote text exceeds ${status.limit} characters`;
+              break;
+            }
+          }
         }
 
         const maximumCharacters = provider.maxLength(

@@ -796,7 +796,7 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
 
     if (information?.mode === 'quote') {
       const text = typeof information.quoteText === 'string' ? information.quoteText.trim() : '';
-      if (!text || !/^[a-f0-9]{64}$/i.test(postId)) {
+      if (!text || text.length > this.maxLength() || !/^[a-f0-9]{64}$/i.test(postId)) {
         throw new Error('Quote text and a valid Nostr event ID are required');
       }
       const relays = await this.relaysFor(integration);

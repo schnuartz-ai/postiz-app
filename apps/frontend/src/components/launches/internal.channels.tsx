@@ -1,6 +1,7 @@
 import { FC, useEffect, useRef, useState } from 'react';
 import SafeImage from '@gitroom/react/helpers/safe.image';
-import { getRepostMode, getQuoteTargets, isRepostPlug, RepostMode, QuoteTarget } from '@gitroom/helpers/utils/repost.mode';
+import { getRepostMode, getQuoteTargets, isRepostPlug, RepostMode, QuoteTarget, quoteCharacterLimit, quoteLengthStatus, sameQuoteCustomer } from '@gitroom/helpers/utils/repost.mode';
+import { useLaunchStore } from '@gitroom/frontend/components/new-launch/store';
 import {
   Integrations,
   useCalendar,
@@ -103,16 +104,30 @@ const PlugField: FC<{
   );
 };
 
+type LinkedQuoteOption = {
+  key: string;
+  source: Integrations;
+  account: Integrations;
+  selected: boolean;
+  conflict: boolean;
+};
+
 const QuoteEditor: FC<{
   account: Integrations;
   initialText: string;
-  onSave: (text: string) => void;
+  linkedAccounts: LinkedQuoteOption[];
+  onSave: (text: string, selected: string[]) => void;
   onRemove: () => void;
   onClose: () => void;
-}> = ({ account, initialText, onSave, onRemove, onClose }) => {
+}> = ({ account, initialText, linkedAccounts, onSave, onRemove, onClose }) => {
   const t = useT();
   const dialog = useRef<HTMLDialogElement>(null);
   const [text, setText] = useState(initialText);
+  const [selected, setSelected] = useState(() => linkedAccounts.filter((item) => item.selected).map((item) => item.key));
+  const status = quoteLengthStatus(text.trim(), [
+    account,
+    ...linkedAccounts.filter((item) => selected.includes(item.key)).map((item) => item.account),
+  ]);
 
   useEffect(() => {
     dialog.current?.showModal();
@@ -142,6 +157,27 @@ const QuoteEditor: FC<{
           rows={5}
           className="w-full rounded-md border border-tableBorder bg-newBgColor p-[10px] resize-y outline-none focus:border-[#612BD3]"
         />
+        <div className={clsx('text-end text-[12px]', !status.valid && 'text-red-400')} aria-live="polite">
+          {status.count} / {status.limit} · {status.identifier === 'x' ? 'X' : 'Nostr'}
+        </div>
+        {!!linkedAccounts.length && (
+          <div className="flex flex-col gap-[8px] border-t border-tableBorder pt-[12px]">
+            <div className="font-semibold">{t('linked_quote_accounts', 'Linked accounts')}</div>
+            <div className="text-[12px] opacity-70">{t('linked_quote_accounts_description', 'Share this quote text with accounts in the same customer group. The lowest character limit applies.')}</div>
+            {linkedAccounts.map((item) => (
+              <label key={item.key} className={clsx('flex items-center gap-[8px] rounded-md border border-tableBorder p-[8px]', item.conflict && 'opacity-50')}>
+                <SafeImage src={item.account.picture || '/no-picture.jpg'} alt="" width={28} height={28} className="rounded-full" />
+                <div className="flex-1 min-w-0">
+                  <div className="truncate">{item.account.name} · {item.account.identifier === 'x' ? 'X' : 'Nostr'}</div>
+                  <div className="text-[11px] opacity-70">{item.conflict ? t('quote_already_configured', 'Already has a separate quote') : `${t('quotes_original', 'Quotes')}: ${item.source.name} · ${quoteCharacterLimit(item.account)}`}</div>
+                </div>
+                <input type="checkbox" className="accent-[#612BD3]" disabled={item.conflict} checked={selected.includes(item.key)} onChange={(event) => {
+                  setSelected((previous) => event.target.checked ? [...previous, item.key] : previous.filter((key) => key !== item.key));
+                }} />
+              </label>
+            ))}
+          </div>
+        )}
         <div className="flex items-center justify-end gap-[8px] flex-wrap">
           {!!initialText && (
             <button type="button" className="me-auto text-red-400" onClick={onRemove}>
@@ -153,9 +189,9 @@ const QuoteEditor: FC<{
           </button>
           <button
             type="button"
-            disabled={!text.trim()}
+            disabled={!text.trim() || !status.valid}
             className="rounded-md px-[12px] py-[8px] bg-[#612BD3] text-white disabled:opacity-40"
-            onClick={() => onSave(text.trim())}
+            onClick={() => onSave(text.trim(), selected)}
           >
             {t('save', 'Save')}
           </button>
@@ -181,9 +217,10 @@ const Plug: FC<{
   };
 }> = ({ plug }) => {
   const { allIntegrations, integration } = useIntegration();
+  const sources = useLaunchStore((state) => state.selectedIntegrations);
   const t = useT();
 
-  const { watch, setValue, control, register } = useSettings();
+  const { watch, setValue, getValues, register } = useSettings();
   const [load, setLoad] = useState(false);
   const val = watch(`plug--${plug.identifier}--integrations`);
   const active = watch(`plug--${plug.identifier}--active`);
@@ -193,6 +230,74 @@ const Plug: FC<{
   const mode = getRepostMode(active, watch(modeName));
   const quoteTargets = getQuoteTargets(watch(quoteName));
   const [editingAccount, setEditingAccount] = useState<Integrations | null>(null);
+
+  const getSourceTargets = (sourceId: string): QuoteTarget[] => {
+    if (sourceId === integration?.id) return getQuoteTargets(getValues(quoteName));
+    const source = sources.find((item) => item.integration.id === sourceId);
+    return getQuoteTargets(source?.ref?.current?.getValues()?.settings?.[`plug--${source.integration.identifier}-repost-post-users--quoteIntegrations`]);
+  };
+
+  const currentTarget = quoteTargets.find((target) => target.id === editingAccount?.id);
+  const linkId = currentTarget?.linkId;
+  const linkedAccounts: LinkedQuoteOption[] = [];
+  if (editingAccount && integration && editingAccount.customer?.id) {
+    for (const source of sources) {
+      const original = source.integration;
+      if (!['x', 'nostr'].includes(original.identifier) || original.disabled || original.inBetweenSteps) continue;
+      if (original.id !== integration.id && !source.ref?.current?.setQuoteSettings) continue;
+      const targets = getSourceTargets(original.id);
+      // A linked quote always references the original on its own platform.
+      const matchingSource = sameQuoteCustomer(integration, original);
+      for (const account of allIntegrations) {
+        if (account.identifier !== original.identifier || account.id === original.id ||
+            account.disabled || account.inBetweenSteps || !sameQuoteCustomer(editingAccount, account) ||
+            (original.id === integration.id && account.id === editingAccount.id)) continue;
+        const existing = targets.find((target) => target.id === account.id);
+        const selected = !!linkId && existing?.linkId === linkId;
+        if (!selected && (!matchingSource || account.identifier === editingAccount.identifier)) continue;
+        linkedAccounts.push({
+          key: JSON.stringify([original.id, account.id]),
+          source: original,
+          account,
+          selected,
+          conflict: !!existing && !selected,
+        });
+      }
+    }
+  }
+
+  const updateLinkedQuote = (text: string, selectedKeys: string[]) => {
+    if (!editingAccount || !integration) return;
+    const selected = linkedAccounts.filter((item) => !item.conflict && selectedKeys.includes(item.key));
+    const group = selected.length ? linkId || JSON.stringify([integration.id, editingAccount.id]) : undefined;
+    const updates = new Map<string, QuoteTarget[]>();
+    const updateTarget = (sourceId: string, targetId: string, next?: QuoteTarget) => {
+      const targets = (updates.get(sourceId) || getSourceTargets(sourceId)).filter((target) => target.id !== targetId);
+      updates.set(sourceId, next ? [...targets, next] : targets);
+    };
+    updateTarget(integration.id, editingAccount.id, text ? { id: editingAccount.id, quoteText: text, ...(group ? { linkId: group } : {}) } : undefined);
+    for (const option of linkedAccounts) {
+      if (selected.includes(option)) {
+        updateTarget(option.source.id, option.account.id, { id: option.account.id, quoteText: text, linkId: group });
+      } else if (option.selected && text) {
+        // Explicitly turning the counterpart off removes only its quote.
+        updateTarget(option.source.id, option.account.id);
+      } else if (option.selected && !text) {
+        // Removing the current quote leaves the other accounts' quotes intact.
+        const existing = getSourceTargets(option.source.id).find((target) => target.id === option.account.id);
+        if (existing) updateTarget(option.source.id, option.account.id, { id: existing.id, quoteText: existing.quoteText });
+      }
+    }
+    for (const [sourceId, targets] of updates) {
+      if (sourceId === integration.id) {
+        saveQuoteTargets(targets);
+      } else {
+        const source = sources.find((item) => item.integration.id === sourceId);
+        source?.ref?.current?.setQuoteSettings(targets, selected.some((item) => item.source.id === sourceId), getValues(`plug--${plug.identifier}--delay`));
+      }
+    }
+    setEditingAccount(null);
+  };
   const setMode = (next: RepostMode) => {
     setValue(modeName, next, { shouldDirty: true });
     setValue(`plug--${plug.identifier}--active`, next !== 'off', { shouldDirty: true });
@@ -316,7 +421,7 @@ const Plug: FC<{
                       >
                         <SafeImage src={account.picture || '/no-picture.jpg'} alt="" width={28} height={28} className="rounded-full" />
                         <div className="text-start min-w-0">
-                          <div className="truncate">{account.name}</div>
+                          <div className="truncate">{account.name}{selected?.linkId ? ' · ' + t('quote_linked', 'Linked') : ''}</div>
                           <div className="truncate opacity-70 max-w-[160px]">{selected?.quoteText || t('add_quote', 'Add quote')}</div>
                         </div>
                       </button>
@@ -327,19 +432,11 @@ const Plug: FC<{
                   <QuoteEditor
                     key={editingAccount.id}
                     account={editingAccount}
-                    initialText={quoteTargets.find((target) => target.id === editingAccount.id)?.quoteText || ''}
+                    initialText={currentTarget?.quoteText || ''}
+                    linkedAccounts={linkedAccounts}
                     onClose={() => setEditingAccount(null)}
-                    onRemove={() => {
-                      saveQuoteTargets(quoteTargets.filter((target) => target.id !== editingAccount.id));
-                      setEditingAccount(null);
-                    }}
-                    onSave={(quoteText) => {
-                      saveQuoteTargets([
-                        ...quoteTargets.filter((target) => target.id !== editingAccount.id),
-                        { id: editingAccount.id, quoteText },
-                      ]);
-                      setEditingAccount(null);
-                    }}
+                    onRemove={() => updateLinkedQuote('', [])}
+                    onSave={updateLinkedQuote}
                   />
                 )}
               </>
