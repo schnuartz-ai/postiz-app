@@ -26,6 +26,8 @@ jest.mock(
 );
 
 import { NostrProvider } from './nostr.provider';
+import { planInternalPlugs } from '@gitroom/nestjs-libraries/database/prisma/posts/internal.plug.plan';
+import { runScheduledActions } from '@gitroom/helpers/utils/run.scheduled.actions';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { readdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -722,12 +724,22 @@ describe('NostrProvider', () => {
 
     it('publishes a scheduled reply signed by the commenting account, not the original author', async () => {
       const originalId = 'd'.repeat(64);
-      await provider.addScheduledComment(
-        { token, internalId: PK } as any,
-        { internalId: FRIEND_PK } as any,
-        originalId,
-        { comment: 'A scheduled reply' }
-      );
+      const actions = planInternalPlugs({ id: 'original', providerIdentifier: 'nostr' }, 'org', originalId, {
+        'plug--nostr-add-comment--active': true,
+        'plug--nostr-add-comment--delay': 0,
+        'plug--nostr-add-comment--commentIntegrations': [{ id: 'commenter', quoteText: 'A scheduled reply' }],
+      });
+      const wait = jest.fn(async (_ms: number) => {});
+      await runScheduledActions(actions, wait, async (action) => {
+        expect(action.integration).toBe('commenter');
+        await provider.addScheduledComment(
+          { token, internalId: PK } as any,
+          { internalId: FRIEND_PK } as any,
+          action.post,
+          action.information
+        );
+      });
+      expect(wait).not.toHaveBeenCalled();
       expect(published).toHaveLength(1);
       const reply = published[0];
       expect(reply.kind).toBe(1);

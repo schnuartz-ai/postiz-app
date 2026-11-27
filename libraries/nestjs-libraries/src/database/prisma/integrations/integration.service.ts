@@ -1,3 +1,5 @@
+import { isAvailableEngagementAccount } from '../posts/internal.plug.plan';
+import { isCommentPlug, isRepostPlug } from '@gitroom/helpers/utils/repost.mode';
 import {
   forwardRef,
   HttpException,
@@ -649,12 +651,10 @@ export class IntegrationService {
     if (!getIntegration || !originalIntegration) {
       return;
     }
-    if (['x-add-comment', 'nostr-add-comment'].includes(data.plugName) &&
-        (getIntegration.deletedAt || getIntegration.disabled || originalIntegration.deletedAt ||
-          getIntegration.id === originalIntegration.id ||
-          getIntegration.providerIdentifier !== originalIntegration.providerIdentifier ||
-          data.plugName !== `${getIntegration.providerIdentifier}-add-comment`)) {
-      return;
+    if ((isCommentPlug(data.plugName) || isRepostPlug(data.plugName)) &&
+        (!isAvailableEngagementAccount(originalIntegration, getIntegration) ||
+          originalIntegration.deletedAt || !data.plugName.startsWith(originalIntegration.providerIdentifier + '-'))) {
+      throw new Error('Scheduled engagement account is no longer available');
     }
 
     const getAllInternalPlugs = this._integrationManager

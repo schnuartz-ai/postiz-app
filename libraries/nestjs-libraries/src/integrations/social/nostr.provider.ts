@@ -796,13 +796,17 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
     if (!text || text.length > this.maxLength() || !/^[a-f0-9]{64}$/i.test(postId)) {
       throw new Error('Invalid scheduled Nostr comment');
     }
-    const relays = await this.relaysFor(integration);
-    const originalRelays = await this.relaysFor(originalIntegration);
+    const [relays, originalRelays] = await Promise.all([
+      this.relaysFor(integration),
+      this.relaysFor(originalIntegration),
+    ]);
     const existing = await pool.querySync(relays, {
       kinds: [1], authors: [integration.internalId], '#e': [postId], limit: 50,
     });
-    if (existing.some((event) => event.content === text &&
-      event.tags.some((tag) => tag[0] === 'e' && tag[1] === postId && tag[3] === 'root'))) return;
+    if (existing.some((event) => verifyEvent(event) && event.pubkey === integration.internalId &&
+      event.content === text &&
+      event.tags.some((tag) => tag[0] === 'e' && tag[1] === postId && tag[3] === 'root') &&
+      !event.tags.some((tag) => tag[0] === 'e' && tag[3] === 'reply' && tag[1] !== postId))) return;
 
     const event = finalizeEvent({
       kind: 1,

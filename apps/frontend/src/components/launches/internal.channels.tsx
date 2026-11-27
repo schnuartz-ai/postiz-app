@@ -254,6 +254,10 @@ const Plug: FC<{
   const linkId = currentTarget?.linkId;
   const linkedAccounts: LinkedQuoteOption[] = [];
   if (supportsQuotes && editingAccount && integration && editingAccount.customer?.id) {
+    const oppositeSources = sources.filter(({ integration: item }) =>
+      item.identifier !== integration.identifier && ['x', 'nostr'].includes(item.identifier) &&
+      !item.disabled && !item.inBetweenSteps
+    );
     for (const source of sources) {
       const original = source.integration;
       if (!['x', 'nostr'].includes(original.identifier) || original.disabled || original.inBetweenSteps) continue;
@@ -261,10 +265,6 @@ const Plug: FC<{
       const targets = getSourceTargets(original.id);
       // A linked quote always references the original on its own platform.
       const matchingSource = sameQuoteCustomer(integration, original);
-      const oppositeSources = sources.filter(({ integration: item }) =>
-        item.identifier !== integration.identifier && ['x', 'nostr'].includes(item.identifier) &&
-        !item.disabled && !item.inBetweenSteps
-      );
       const unambiguousSource = oppositeSources.length === 1 && oppositeSources[0].integration.id === original.id;
       for (const account of allIntegrations) {
         if (account.identifier !== original.identifier || account.id === original.id ||
@@ -342,11 +342,8 @@ const Plug: FC<{
   useEffect(() => {
     setValue(`plug--${plug.identifier}--integrations`, [...localValue]);
   }, [localValue, plug, setValue]);
-  const [allowedIntegrations] = useState(
-    allIntegrations.filter(
-      (i) =>
-        plug.pickIntegration.includes(i.identifier) && integration?.id !== i.id
-    )
+  const allowedIntegrations = allIntegrations.filter(
+    (i) => plug.pickIntegration.includes(i.identifier) && integration?.id !== i.id
   );
   if (!load) {
     return null;

@@ -10,6 +10,7 @@ import {
   patched,
 } from '@temporalio/workflow';
 import { resolveScheduledDelay, MINUTE_MS } from '@gitroom/helpers/utils/scheduled.delay';
+import { runScheduledActions } from '@gitroom/helpers/utils/run.scheduled.actions';
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
 import { capitalize, sortBy } from 'lodash';
@@ -427,27 +428,29 @@ export async function postWorkflowV112({
   // Math.random is replay-safe; a delay is sampled only once per comment.
   const scheduledDelayV1 = patched('scheduled-delays-v1');
   let internalWork: Promise<void> | undefined;
+  const { processInternalPlug: runInternalPlug } = proxyActivities<PostActivity>({
+    startToCloseTimeout: '10 minute',
+    taskQueue,
+    retry: { maximumAttempts: 1 },
+  });
   const runInternalActions = async () => {
+    const started = Date.now();
     const actions = await internalPlugs(post.integration, JSON.parse(post.settings));
-    await Promise.all(actions.map(async (todo) => {
-      const remaining = Math.max(0, todo.delay);
-      if (remaining > 0) await sleep(remaining);
-      // Do not retry an uncertain create. A refresh-token failure may be retried.
-      const { processInternalPlug: run } = proxyActivities<PostActivity>({
-        startToCloseTimeout: '10 minute',
-        taskQueue,
-        retry: { maximumAttempts: 1 },
-      });
+    await runScheduledActions(actions, sleep, async (todo) => {
       for (const _ of iterate) {
         try {
-          await run({ ...todo, post: postsResults[0].postId });
-          break;
+          await runInternalPlug({ ...todo, post: postsResults[0].postId });
+          return;
         } catch (err) {
           const handle = await handleActivityError(err, () => getIntegrationById(organizationId, todo.integration));
-          if (handle.type !== 'retry') break;
+          if (handle.type === 'retry') continue;
+          break;
         }
       }
-    }));
+      await inAppNotification(post.organizationId, 'Scheduled engagement failed',
+        'A scheduled repost or comment could not be confirmed. Check the target account before retrying.',
+        true, false, 'fail').catch(() => undefined);
+    }, () => Date.now() - started);
   };
 
   try {

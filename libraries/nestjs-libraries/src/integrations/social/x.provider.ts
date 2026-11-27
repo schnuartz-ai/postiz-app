@@ -368,9 +368,14 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       throw new BadBody(this.identifier, '{}', Buffer.from('{}'), 'Invalid scheduled comment');
     }
     const client = await this.getClient(integration.token);
+    // Follow the same link policy as normal X comments.
+    const message = this.stripLinks() ? removeLinks(text) : text;
+    if (!message.trim()) {
+      throw new BadBody(this.identifier, '{}', Buffer.from('{}'), 'Scheduled comment is empty after link removal');
+    }
     // A reply is a non-idempotent create. Never retry an ambiguous API result.
     try {
-      await client.v2.tweet({ text, reply: { in_reply_to_tweet_id: postId } });
+      await client.v2.tweet({ text: message, reply: { in_reply_to_tweet_id: postId } });
     } catch {
       throw new BadBody(this.identifier, '{}', Buffer.from('{}'), 'X comment could not be confirmed; check the account before retrying');
     }
