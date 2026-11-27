@@ -394,15 +394,8 @@ export class XProvider extends SocialAbstract implements SocialProvider {
     postId: string,
     information: any
   ) {
-    const [accessTokenSplit, accessSecretSplit] = integration.token.split(':');
-    const client = new TwitterApi({
-      appKey: process.env.X_API_KEY!,
-      appSecret: process.env.X_API_SECRET!,
-      accessToken: accessTokenSplit,
-      accessSecret: accessSecretSplit,
-    });
-
     if (information?.mode === 'off' || information?.active === false) return;
+    const client = await this.getClient(integration.token);
     if (information?.mode === 'quote') {
       const text = typeof information.quoteText === 'string' ? information.quoteText.trim() : '';
       if (!text) {
