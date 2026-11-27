@@ -11,10 +11,12 @@ export const useDefaultDelay = () => useContext(DefaultDelayContext);
 
 export function useDefaultDelayPreference(active = true) {
   const fetch = useFetch();
-  const orgId = useUser()?.orgId;
-  const enabled = active && !!orgId;
+  const user = useUser();
+  const orgId = user?.orgId;
+  // The standalone editor may mount before its authenticated user has loaded.
+  const enabled = active && user !== undefined;
   const result = useSWR<{ defaultDelay: number }>(
-    enabled ? ['default-delay', orgId] : null,
+    enabled && orgId ? ['default-delay', orgId] : null,
     async () => {
       const response = await fetch('/settings/default-delay');
       if (!response.ok) throw new Error('Could not load default delay');

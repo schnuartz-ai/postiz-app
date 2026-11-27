@@ -15,7 +15,7 @@ import { Textarea } from '@gitroom/react/form/textarea';
 import { useSettings } from '@gitroom/frontend/components/launches/helpers/use.values';
 import clsx from 'clsx';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import { isMissingDelay, scheduledDelayOptions, withDefaultDelay } from '@gitroom/helpers/utils/scheduled.delay';
+import { isMissingDelay, MINUTE_MS, scheduledDelayOptions, withDefaultDelay } from '@gitroom/helpers/utils/scheduled.delay';
 import { useDefaultDelay } from '@gitroom/frontend/components/settings/default-delay.context';
 
 const delayOptions = scheduledDelayOptions(1);
@@ -389,7 +389,7 @@ const Plug: FC<{
               onChange={(event) => setValue(delayName, event.target.value, { shouldDirty: true })}
             >
               {!delayOptions.some((p) => p.value === effectiveDelay) && (
-                <option value={effectiveDelay}>{effectiveDelay / 60000} min</option>
+                <option value={effectiveDelay}>{effectiveDelay / MINUTE_MS} min</option>
               )}
               {delayOptions.map((p) => (
                 <option key={p.value} value={p.value}>

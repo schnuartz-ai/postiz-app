@@ -1,3 +1,6 @@
+import 'reflect-metadata';
+import { validateSync } from 'class-validator';
+import { DefaultDelayDto } from '@gitroom/nestjs-libraries/dtos/settings/default-delay.dto';
 import { scheduledDelayOptions, withDefaultDelay, DEFAULT_SCHEDULED_DELAY, MINUTE_MS, RANDOM_30_MINUTES, RANDOM_60_MINUTES, resolveScheduledDelay } from '@gitroom/helpers/utils/scheduled.delay';
 
 describe('scheduled delays', () => {
@@ -17,6 +20,15 @@ describe('scheduled delays', () => {
     expect(withDefaultDelay(0, RANDOM_30_MINUTES, 1)).toBe(0);
     expect(withDefaultDelay('0', RANDOM_30_MINUTES)).toBe(0);
     expect(withDefaultDelay('7200000', 15, 1)).toBe(7200000);
+  });
+
+  it('accepts only supported workspace default presets', () => {
+    for (const { value } of scheduledDelayOptions()) {
+      expect(validateSync(Object.assign(new DefaultDelayDto(), { defaultDelay: value }))).toHaveLength(0);
+    }
+    for (const value of [-1, -999, 3600000, '15', null, undefined]) {
+      expect(validateSync(Object.assign(new DefaultDelayDto(), { defaultDelay: value }))).not.toHaveLength(0);
+    }
   });
 
   it('keeps existing fixed milliseconds and thread minutes unchanged', () => {
