@@ -8,21 +8,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useClickOutside } from '@mantine/hooks';
 
-import { RANDOM_DELAY_OPTIONS } from '@gitroom/helpers/utils/scheduled.delay';
+import { scheduledDelayOptions } from '@gitroom/helpers/utils/scheduled.delay';
 
-const delayOptions = [
-  { value: 0, label: 'Immediately' },
-  RANDOM_DELAY_OPTIONS[0],
-  { value: 60, label: '1h' },
-  RANDOM_DELAY_OPTIONS[1],
-  { value: 1, label: '1m' },
-  { value: 2, label: '2m' },
-  { value: 5, label: '5m' },
-  { value: 10, label: '10m' },
-  { value: 15, label: '15m' },
-  { value: 30, label: '30m' },
-  { value: 120, label: '2h' },
-];
+const delayOptions = scheduledDelayOptions();
 
 export const DelayComponent: FC<{
   currentIndex: number;

@@ -15,38 +15,10 @@ import { Textarea } from '@gitroom/react/form/textarea';
 import { useSettings } from '@gitroom/frontend/components/launches/helpers/use.values';
 import clsx from 'clsx';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
-import { DEFAULT_SCHEDULED_DELAY, RANDOM_DELAY_OPTIONS, MINUTE_MS } from '@gitroom/helpers/utils/scheduled.delay';
+import { isMissingDelay, scheduledDelayOptions, withDefaultDelay } from '@gitroom/helpers/utils/scheduled.delay';
+import { useDefaultDelay } from '@gitroom/frontend/components/settings/default-delay.context';
 
-const delayOptions = [
-  { name: 'Immediately', value: 0 },
-  { name: RANDOM_DELAY_OPTIONS[0].label, value: RANDOM_DELAY_OPTIONS[0].value },
-  { name: '1 hour', value: 60 * MINUTE_MS },
-  { name: RANDOM_DELAY_OPTIONS[1].label, value: RANDOM_DELAY_OPTIONS[1].value },
-  {
-    name: '2 hours',
-    value: 7200000,
-  },
-  {
-    name: '3 hours',
-    value: 10800000,
-  },
-  {
-    name: '8 hours',
-    value: 28800000,
-  },
-  {
-    name: '12 hours',
-    value: 43200000,
-  },
-  {
-    name: '15 hours',
-    value: 54000000,
-  },
-  {
-    name: '24 hours',
-    value: 86400000,
-  },
-];
+const delayOptions = scheduledDelayOptions(1);
 export const InternalChannels: FC<{
   plugs: {
     identifier: string;
@@ -227,14 +199,21 @@ const Plug: FC<{
   const { watch, setValue, getValues, register } = useSettings();
   const [load, setLoad] = useState(false);
   const delayName = `plug--${plug.identifier}--delay`;
+  const defaultDelay = useDefaultDelay();
   const configuredDelay = watch(delayName);
-  useEffect(() => {
-    if (getValues(delayName) == null || getValues(delayName) === '') {
-      setValue(delayName, String(DEFAULT_SCHEDULED_DELAY));
-    }
-  }, [delayName, getValues, setValue]);
   const val = watch(`plug--${plug.identifier}--integrations`);
   const active = watch(`plug--${plug.identifier}--active`);
+  const effectiveDelay = withDefaultDelay(configuredDelay, defaultDelay, 1);
+  const initializeDelay = () => {
+    if (isMissingDelay(getValues(delayName))) {
+      setValue(delayName, String(withDefaultDelay(undefined, defaultDelay, 1)), { shouldDirty: true });
+    }
+  };
+  useEffect(() => {
+    if (active && isMissingDelay(configuredDelay)) {
+      setValue(delayName, String(effectiveDelay));
+    }
+  }, [active, configuredDelay, effectiveDelay, delayName, setValue]);
   const supportsQuotes = isRepostPlug(plug.identifier);
   const supportsComments = isCommentPlug(plug.identifier);
   const modeName = `plug--${plug.identifier}--mode`;
@@ -324,6 +303,7 @@ const Plug: FC<{
     setEditingAccount(null);
   };
   const setMode = (next: RepostMode) => {
+    if (next !== 'off') initializeDelay();
     setValue(modeName, next, { shouldDirty: true });
     setValue(`plug--${plug.identifier}--active`, next !== 'off', { shouldDirty: true });
   };
@@ -380,9 +360,10 @@ const Plug: FC<{
           ) : (
             <Slider
               value={active ? 'on' : 'off'}
-              onChange={(p) =>
-                setValue(`plug--${plug.identifier}--active`, p === 'on')
-              }
+              onChange={(p) => {
+                if (p === 'on') initializeDelay();
+                setValue(`plug--${plug.identifier}--active`, p === 'on');
+              }}
               fill={true}
             />
           )}
@@ -404,12 +385,15 @@ const Plug: FC<{
               hideErrors={true}
               name={delayName}
               disableForm={true}
-              value={configuredDelay ?? String(DEFAULT_SCHEDULED_DELAY)}
+              value={String(effectiveDelay)}
               onChange={(event) => setValue(delayName, event.target.value, { shouldDirty: true })}
             >
+              {!delayOptions.some((p) => p.value === effectiveDelay) && (
+                <option value={effectiveDelay}>{effectiveDelay / 60000} min</option>
+              )}
               {delayOptions.map((p) => (
-                <option key={p.name} value={p.value}>
-                  {p.name}
+                <option key={p.value} value={p.value}>
+                  {p.label}
                 </option>
               ))}
             </Select>

@@ -5,6 +5,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import dynamic from 'next/dynamic';
 import AuthenticationComponent from '@gitroom/frontend/components/settings/authentication.component';
 import EmailNotificationsComponent from '@gitroom/frontend/components/settings/email-notifications.component';
+import { DefaultDelaySettings } from '@gitroom/frontend/components/settings/default-delay.component';
 import ShortlinkPreferenceComponent from '@gitroom/frontend/components/settings/shortlink-preference.component';
 import DeleteAccountComponent from '@gitroom/frontend/components/settings/delete-account.component';
 
@@ -24,6 +25,7 @@ export const GlobalSettings = () => {
       <MetricComponent />
       <EmailNotificationsComponent />
       <ShortlinkPreferenceComponent />
+      <DefaultDelaySettings />
       <DeleteAccountComponent />
     </div>
   );

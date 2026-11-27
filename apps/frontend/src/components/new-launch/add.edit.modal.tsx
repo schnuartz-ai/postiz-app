@@ -16,6 +16,9 @@ import { useModals } from '@gitroom/frontend/components/layout/new-modal';
 import { useToaster } from '@gitroom/react/toaster/toaster';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { Post } from '@prisma/client';
+import { DefaultDelayContext, useDefaultDelayPreference } from '@gitroom/frontend/components/settings/default-delay.context';
+import { DEFAULT_SCHEDULED_DELAY, withDefaultDelay } from '@gitroom/helpers/utils/scheduled.delay';
+import { useContext } from 'react';
 import { EditorErrorBoundary } from '@gitroom/frontend/components/new-launch/editor.error.boundary';
 
 export interface AddEditModalProps {
@@ -33,6 +36,7 @@ export interface AddEditModalProps {
   customClose?: () => void;
   onlyValues?: Array<{
     content: string;
+    delay?: number;
     id?: string;
     image?: Array<{
       id: string;
@@ -167,6 +171,27 @@ const postValues = (posts: Post[]) =>
   }));
 
 export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
+  const { data, error, mutate, enabled } = useDefaultDelayPreference(!props.dummy);
+  const t = useT();
+  if (enabled && !data) {
+    return error ? (
+      <div className="p-4">
+        {t('default_delay_load_error', 'Could not load the default delay.')}
+        <button type="button" className="ms-2 underline" onClick={() => mutate()}>
+          {t('retry', 'Retry')}
+        </button>
+      </div>
+    ) : <div className="p-4">{t('loading', 'Loading...')}</div>;
+  }
+  return (
+    <DefaultDelayContext.Provider value={data?.defaultDelay ?? DEFAULT_SCHEDULED_DELAY}>
+      <InitializedEditor {...props} />
+    </DefaultDelayContext.Provider>
+  );
+};
+
+const InitializedEditor: FC<AddEditModalProps> = (props) => {
+  const defaultDelay = useContext(DefaultDelayContext);
   const existingData = useExistingData();
   const {
     reset,
@@ -242,7 +267,8 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
     addGlobalValue(
       0,
       props.onlyValues?.length
-        ? props.onlyValues.map((p) => ({
+        ? props.onlyValues.map((p, index) => ({
+            delay: index === 0 ? 0 : withDefaultDelay(p.delay, defaultDelay),
             content:
               /<p[\s>]/i.test(p.content || '')
                 ? p.content
@@ -254,7 +280,8 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
             media: p.image || [],
           }))
         : props.set?.posts?.length
-        ? props.set.posts[0].value.map((p: any) => ({
+        ? props.set.posts[0].value.map((p: any, index: number) => ({
+            delay: index === 0 ? 0 : withDefaultDelay(p.delay, defaultDelay),
             id: makeId(10),
             content:
               /<p[\s>]/i.test(p.content || '')
@@ -269,6 +296,7 @@ export const AddEditModalInnerInner: FC<AddEditModalProps> = (props) => {
         : [
             {
               content: '',
+              delay: 0,
               id: makeId(10),
               media: [],
             },

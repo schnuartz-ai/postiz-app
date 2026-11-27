@@ -69,7 +69,8 @@ import {
   DelayIcon,
 } from '@gitroom/frontend/components/ui/icons';
 import { DelayComponent } from '@gitroom/frontend/components/new-launch/delay.component';
-import { DEFAULT_SCHEDULED_DELAY } from '@gitroom/helpers/utils/scheduled.delay';
+import { useDefaultDelay } from '@gitroom/frontend/components/settings/default-delay.context';
+import { withDefaultDelay } from '@gitroom/helpers/utils/scheduled.delay';
 
 const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024; // 1 GB
 
@@ -148,6 +149,7 @@ export const EditorWrapper: FC<{
   value: string;
 }> = () => {
   const t = useT();
+  const defaultDelay = useDefaultDelay();
   const {
     setGlobalValueText,
     setInternalValueText,
@@ -254,7 +256,7 @@ export const EditorWrapper: FC<{
       const newValue = value.map((p, index) => {
         return {
           id: makeId(10),
-          delay: index === 0 ? 0 : (items?.[index]?.delay ?? DEFAULT_SCHEDULED_DELAY),
+          delay: index === 0 ? 0 : withDefaultDelay(items?.[index]?.delay, defaultDelay),
           ...(items?.[index]?.media
             ? { media: items[index].media }
             : { media: [] }),
@@ -267,7 +269,7 @@ export const EditorWrapper: FC<{
 
       return setGlobalValue(newValue);
     },
-    [internal, items]
+    [internal, items, current, defaultDelay, setInternalValue, setGlobalValue]
   );
 
   useCopilotReadable({
@@ -367,7 +369,7 @@ export const EditorWrapper: FC<{
       if (internal) {
         return addInternalValue(index, current, [
           {
-            delay: DEFAULT_SCHEDULED_DELAY,
+            delay: defaultDelay,
             content: '',
             id: makeId(10),
             media: [],
@@ -377,14 +379,14 @@ export const EditorWrapper: FC<{
 
       return addGlobalValue(index, [
         {
-          delay: DEFAULT_SCHEDULED_DELAY,
+          delay: defaultDelay,
           content: '',
           id: makeId(10),
           media: [],
         },
       ]);
     },
-    [current, global, internal]
+    [current, internal, defaultDelay, addInternalValue, addGlobalValue]
   );
 
   const deletePost = useCallback(
