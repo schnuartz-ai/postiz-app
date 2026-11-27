@@ -14,6 +14,7 @@ import { CheckPolicies } from '@gitroom/backend/services/auth/permissions/permis
 import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
 import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.team.member.dto';
 import { AdminAddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/admin.add.team.member.dto';
+import { DefaultDelayDto } from '@gitroom/nestjs-libraries/dtos/settings/default-delay.dto';
 import { ShortlinkPreferenceDto } from '@gitroom/nestjs-libraries/dtos/settings/shortlink-preference.dto';
 import { ApiTags } from '@nestjs/swagger';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
@@ -70,6 +71,20 @@ export class SettingsController {
     @Param('id') id: string
   ) {
     return this._organizationService.deleteTeamMember(org, id);
+  }
+
+  @Get('/default-delay')
+  getDefaultDelay(@GetOrgFromRequest() org: Organization) {
+    return this._organizationService.getDefaultDelay(org.id);
+  }
+
+  @Post('/default-delay')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  updateDefaultDelay(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: DefaultDelayDto
+  ) {
+    return this._organizationService.updateDefaultDelay(org.id, body.defaultDelay);
   }
 
   @Get('/shortlink')

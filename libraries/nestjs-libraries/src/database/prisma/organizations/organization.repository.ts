@@ -677,6 +677,21 @@ export class OrganizationRepository {
     });
   }
 
+  getDefaultDelay(orgId: string) {
+    return this._organization.model.organization.findUniqueOrThrow({
+      where: { id: orgId },
+      select: { defaultDelay: true },
+    });
+  }
+
+  updateDefaultDelay(orgId: string, defaultDelay: number) {
+    return this._organization.model.organization.update({
+      where: { id: orgId },
+      data: { defaultDelay },
+      select: { defaultDelay: true },
+    });
+  }
+
   getShortlinkPreference(orgId: string) {
     return this._organization.model.organization.findUnique({
       where: {

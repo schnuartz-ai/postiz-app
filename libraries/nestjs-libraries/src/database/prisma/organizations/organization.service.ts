@@ -209,6 +209,14 @@ export class OrganizationService {
     );
   }
 
+  getDefaultDelay(orgId: string) {
+    return this._organizationRepository.getDefaultDelay(orgId);
+  }
+
+  updateDefaultDelay(orgId: string, defaultDelay: number) {
+    return this._organizationRepository.updateDefaultDelay(orgId, defaultDelay);
+  }
+
   getShortlinkPreference(orgId: string) {
     return this._organizationRepository.getShortlinkPreference(orgId);
   }

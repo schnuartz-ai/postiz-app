@@ -19,7 +19,8 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { InternalChannels } from '@gitroom/frontend/components/launches/internal.channels';
-import { DEFAULT_SCHEDULED_DELAY } from '@gitroom/helpers/utils/scheduled.delay';
+import { isMissingDelay, withDefaultDelay } from '@gitroom/helpers/utils/scheduled.delay';
+import { useDefaultDelay } from '@gitroom/frontend/components/settings/default-delay.context';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import SafeImage from '@gitroom/react/helpers/safe.image';
@@ -178,6 +179,7 @@ export const withProvider = function <T extends object>(params: {
       return global;
     }, [internal, global, isGlobal]);
 
+    const defaultDelay = useDefaultDelay();
     const form = useForm({
       resolver: classValidatorResolver(dto || Empty),
       ...(Object.keys(selectedIntegration.settings).length > 0
@@ -240,8 +242,8 @@ export const withProvider = function <T extends object>(params: {
           if (activate) {
             form.setValue(prefix + 'mode', 'quote', { shouldDirty: true });
             form.setValue(prefix + 'active', true, { shouldDirty: true });
-            if (form.getValues(prefix + 'delay') == null) {
-              form.setValue(prefix + 'delay', delay ?? String(DEFAULT_SCHEDULED_DELAY), { shouldDirty: true });
+            if (isMissingDelay(form.getValues(prefix + 'delay'))) {
+              form.setValue(prefix + 'delay', String(withDefaultDelay(delay, defaultDelay, 1)), { shouldDirty: true });
             }
           }
         },
@@ -260,7 +262,7 @@ export const withProvider = function <T extends object>(params: {
           setHide(true);
         },
       }),
-      [value]
+      [value, defaultDelay, selectedIntegration.integration.identifier]
     );
 
     return (
