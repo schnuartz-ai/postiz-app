@@ -1,3 +1,4 @@
+import { getRepostMode, getQuoteTargets, isRepostPlug } from '@gitroom/helpers/utils/repost.mode';
 import {
   BadRequestException,
   Injectable,
@@ -826,7 +827,7 @@ export class PostsService {
     settings: any
   ) {
     const plugs = Object.entries(settings).filter(([key]) => {
-      return key.indexOf('plug-') > -1;
+      return key.startsWith('plug--');
     });
 
     if (plugs.length === 0) {
@@ -835,28 +836,38 @@ export class PostsService {
 
     const parsePlugs = plugs.reduce((all, [key, value]) => {
       const [_, name, identifier] = key.split('--');
-      all[name] = all[name] || { name };
+      if (!name || !identifier || identifier === 'name') return all;
+      all[name] = all[name] || Object.assign(Object.create(null), { name });
       all[name][identifier] = value;
       return all;
-    }, {} as any);
+    }, Object.create(null) as any);
 
     const list: {
       name: string;
       integrations: { id: string }[];
+      quoteIntegrations?: unknown;
+      mode?: unknown;
       delay: string;
       active: boolean;
     }[] = Object.values(parsePlugs);
 
     return (list || []).flatMap((trigger) => {
-      return (trigger?.integrations || []).flatMap((int) => ({
+      const repost = isRepostPlug(trigger.name);
+      const mode = repost ? getRepostMode(trigger.active, trigger.mode) : undefined;
+      if (repost && (mode === 'off' || trigger.name !== `${integration.providerIdentifier}-repost-post-users`)) {
+        return [];
+      }
+      const targets: { id: string; quoteText?: string }[] =
+        mode === 'quote' ? getQuoteTargets(trigger.quoteIntegrations) : trigger.integrations || [];
+      return targets.filter((int) => int && typeof int.id === 'string' && (!repost || int.id !== integration.id)).map((int) => ({
         type: 'internal-plug',
         post: id,
         originalIntegration: integration.id,
         integration: int.id,
         plugName: trigger.name,
         orgId: orgId,
-        delay: +trigger.delay,
-        information: trigger,
+        delay: +trigger.delay || 0,
+        information: repost ? { mode, ...(mode === 'quote' ? { quoteText: int.quoteText } : {}) } : trigger,
       }));
     });
   }

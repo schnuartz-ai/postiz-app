@@ -369,6 +369,22 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       accessSecret: accessSecretSplit,
     });
 
+    if (information?.mode === 'off' || information?.active === false) return;
+    if (information?.mode === 'quote') {
+      const text = typeof information.quoteText === 'string' ? information.quoteText.trim() : '';
+      if (!text) {
+        throw new BadBody(this.identifier, '{}', Buffer.from('{}'), 'Quote text is required');
+      }
+      // Creating a quote is not idempotent. Do not retry an ambiguous API
+      // failure as a normal repost or another create.
+      try {
+        await client.v2.tweet({ text, quote_tweet_id: postId });
+      } catch {
+        throw new BadBody(this.identifier, '{}', Buffer.from('{}'), 'X quote could not be confirmed; check the account before retrying');
+      }
+      return;
+    }
+
     const {
       data: { id },
     } = await client.v2.me();
