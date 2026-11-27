@@ -160,6 +160,9 @@ const QuoteEditor: FC<{
         <div className={clsx('text-end text-[12px]', !status.valid && 'text-red-400')} aria-live="polite">
           {status.count} / {status.limit} · {status.identifier === 'x' ? 'X' : 'Nostr'}
         </div>
+        {!linkedAccounts.length && !!account.customer?.id && (
+          <div className="text-[12px] opacity-70">{t('linked_quote_no_accounts', 'No matching account on another selected original channel. Select the corresponding original X or Nostr channel to link quotes.')}</div>
+        )}
         {!!linkedAccounts.length && (
           <div className="flex flex-col gap-[8px] border-t border-tableBorder pt-[12px]">
             <div className="font-semibold">{t('linked_quote_accounts', 'Linked accounts')}</div>
@@ -234,7 +237,8 @@ const Plug: FC<{
   const getSourceTargets = (sourceId: string): QuoteTarget[] => {
     if (sourceId === integration?.id) return getQuoteTargets(getValues(quoteName));
     const source = sources.find((item) => item.integration.id === sourceId);
-    return getQuoteTargets(source?.ref?.current?.getValues()?.settings?.[`plug--${source.integration.identifier}-repost-post-users--quoteIntegrations`]);
+    if (!source) return [];
+    return getQuoteTargets(source.ref?.current?.getValues()?.settings?.[`plug--${source.integration.identifier}-repost-post-users--quoteIntegrations`]);
   };
 
   const currentTarget = quoteTargets.find((target) => target.id === editingAccount?.id);
@@ -248,13 +252,18 @@ const Plug: FC<{
       const targets = getSourceTargets(original.id);
       // A linked quote always references the original on its own platform.
       const matchingSource = sameQuoteCustomer(integration, original);
+      const oppositeSources = sources.filter(({ integration: item }) =>
+        item.identifier !== integration.identifier && ['x', 'nostr'].includes(item.identifier) &&
+        !item.disabled && !item.inBetweenSteps
+      );
+      const unambiguousSource = oppositeSources.length === 1 && oppositeSources[0].integration.id === original.id;
       for (const account of allIntegrations) {
         if (account.identifier !== original.identifier || account.id === original.id ||
             account.disabled || account.inBetweenSteps || !sameQuoteCustomer(editingAccount, account) ||
             (original.id === integration.id && account.id === editingAccount.id)) continue;
         const existing = targets.find((target) => target.id === account.id);
         const selected = !!linkId && existing?.linkId === linkId;
-        if (!selected && (!matchingSource || account.identifier === editingAccount.identifier)) continue;
+        if (!selected && (!(matchingSource || unambiguousSource) || account.identifier === editingAccount.identifier)) continue;
         linkedAccounts.push({
           key: JSON.stringify([original.id, account.id]),
           source: original,
@@ -271,6 +280,7 @@ const Plug: FC<{
     const selected = linkedAccounts.filter((item) => !item.conflict && selectedKeys.includes(item.key));
     const group = selected.length ? linkId || JSON.stringify([integration.id, editingAccount.id]) : undefined;
     const updates = new Map<string, QuoteTarget[]>();
+    const remainingLinked = linkedAccounts.filter((item) => item.selected).length;
     const updateTarget = (sourceId: string, targetId: string, next?: QuoteTarget) => {
       const targets = (updates.get(sourceId) || getSourceTargets(sourceId)).filter((target) => target.id !== targetId);
       updates.set(sourceId, next ? [...targets, next] : targets);
@@ -285,7 +295,7 @@ const Plug: FC<{
       } else if (option.selected && !text) {
         // Removing the current quote leaves the other accounts' quotes intact.
         const existing = getSourceTargets(option.source.id).find((target) => target.id === option.account.id);
-        if (existing) updateTarget(option.source.id, option.account.id, { id: existing.id, quoteText: existing.quoteText });
+        if (existing && remainingLinked === 1) updateTarget(option.source.id, option.account.id, { id: existing.id, quoteText: existing.quoteText });
       }
     }
     for (const [sourceId, targets] of updates) {
