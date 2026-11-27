@@ -32,6 +32,10 @@ export function sameQuoteCustomer(a: { customer?: { id?: string } }, b: { custom
 }
 
 
+export function isCommentPlug(identifier: string) {
+  return identifier === 'x-add-comment' || identifier === 'nostr-add-comment';
+}
+
 export function isRepostPlug(identifier: string) {
   return identifier === 'x-repost-post-users' || identifier === 'nostr-repost-post-users';
 }

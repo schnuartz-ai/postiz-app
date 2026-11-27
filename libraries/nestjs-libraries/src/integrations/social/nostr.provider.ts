@@ -780,6 +780,48 @@ export class NostrProvider extends SocialAbstract implements SocialProvider {
   // ---------------------------------------------------------------------------
 
   @PostPlug({
+    identifier: 'nostr-add-comment',
+    title: 'Add comments by a different account',
+    description: 'Schedule comments from other Nostr accounts on your post',
+    pickIntegration: ['nostr'],
+    fields: [],
+  })
+  async addScheduledComment(
+    integration: Integration,
+    originalIntegration: Integration,
+    postId: string,
+    information: any
+  ) {
+    const text = typeof information?.comment === 'string' ? information.comment.trim() : '';
+    if (!text || text.length > this.maxLength() || !/^[a-f0-9]{64}$/i.test(postId)) {
+      throw new Error('Invalid scheduled Nostr comment');
+    }
+    const [relays, originalRelays] = await Promise.all([
+      this.relaysFor(integration),
+      this.relaysFor(originalIntegration),
+    ]);
+    const existing = await pool.querySync(relays, {
+      kinds: [1], authors: [integration.internalId], '#e': [postId], limit: 50,
+    });
+    if (existing.some((event) => verifyEvent(event) && event.pubkey === integration.internalId &&
+      event.content === text &&
+      event.tags.some((tag) => tag[0] === 'e' && tag[1] === postId && tag[3] === 'root') &&
+      !event.tags.some((tag) => tag[0] === 'e' && tag[3] === 'reply' && tag[1] !== postId))) return;
+
+    const event = finalizeEvent({
+      kind: 1,
+      content: text,
+      tags: [
+        ['e', postId, originalRelays[0] || '', 'root', originalIntegration.internalId],
+        ['p', originalIntegration.internalId],
+        ...this.referenceTags(text),
+      ],
+      created_at: Math.floor(Date.now() / 1000),
+    }, this.getSecretKey(integration.token));
+    await this.publishEvent(relays, event);
+  }
+
+  @PostPlug({
     identifier: 'nostr-repost-post-users',
     title: 'Add Re-posters',
     description: 'Add accounts to repost your post',

@@ -26,6 +26,8 @@ jest.mock(
 );
 
 import { NostrProvider } from './nostr.provider';
+import { planInternalPlugs } from '@gitroom/nestjs-libraries/database/prisma/posts/internal.plug.plan';
+import { runScheduledActions } from '@gitroom/helpers/utils/run.scheduled.actions';
 import { AuthService } from '@gitroom/helpers/auth/auth.service';
 import { readdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -708,11 +710,47 @@ describe('NostrProvider', () => {
       );
       expect(plugs).toEqual([
         expect.objectContaining({
+          identifier: 'nostr-add-comment',
+          pickIntegration: ['nostr'],
+          methodName: 'addScheduledComment',
+        }),
+        expect.objectContaining({
           identifier: 'nostr-repost-post-users',
           pickIntegration: ['nostr'],
           methodName: 'repostPostUsers',
         }),
       ]);
+    });
+
+    it('publishes a scheduled reply signed by the commenting account, not the original author', async () => {
+      const originalId = 'd'.repeat(64);
+      const actions = planInternalPlugs({ id: 'original', providerIdentifier: 'nostr' }, 'org', originalId, {
+        'plug--nostr-add-comment--active': true,
+        'plug--nostr-add-comment--delay': 0,
+        'plug--nostr-add-comment--commentIntegrations': [{ id: 'commenter', quoteText: 'A scheduled reply' }],
+      });
+      const wait = jest.fn(async (_ms: number) => {});
+      await runScheduledActions(actions, wait, async (action) => {
+        expect(action.integration).toBe('commenter');
+        await provider.addScheduledComment(
+          { token, internalId: PK } as any,
+          { internalId: FRIEND_PK } as any,
+          action.post,
+          action.information
+        );
+      });
+      expect(wait).not.toHaveBeenCalled();
+      expect(published).toHaveLength(1);
+      const reply = published[0];
+      expect(reply.kind).toBe(1);
+      expect(reply.pubkey).toBe(PK);
+      expect(reply.content).toBe('A scheduled reply');
+      expect(reply.tags.some((tag) => tag[0] === 'e' && tag[1] === originalId && tag[3] === 'root' && tag[4] === FRIEND_PK)).toBe(true);
+      expect(reply.tags).toContainEqual(['p', FRIEND_PK]);
+      expect(verifyEvent(reply)).toBe(true);
+      jest.spyOn(SimplePool.prototype, 'querySync').mockResolvedValue([reply]);
+      await provider.addScheduledComment({ token, internalId: PK } as any, { internalId: FRIEND_PK } as any, originalId, { comment: 'A scheduled reply' });
+      expect(published).toHaveLength(1);
     });
 
     it('publishes a signed kind 1 quote with the selected account text and NIP-27 reference', async () => {

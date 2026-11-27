@@ -8,14 +8,19 @@ import { useShallow } from 'zustand/react/shallow';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useClickOutside } from '@mantine/hooks';
 
+import { RANDOM_DELAY_OPTIONS } from '@gitroom/helpers/utils/scheduled.delay';
+
 const delayOptions = [
+  { value: 0, label: 'Immediately' },
+  RANDOM_DELAY_OPTIONS[0],
+  { value: 60, label: '1h' },
+  RANDOM_DELAY_OPTIONS[1],
   { value: 1, label: '1m' },
   { value: 2, label: '2m' },
   { value: 5, label: '5m' },
   { value: 10, label: '10m' },
   { value: 15, label: '15m' },
   { value: 30, label: '30m' },
-  { value: 60, label: '1h' },
   { value: 120, label: '2h' },
 ];
 
@@ -72,7 +77,7 @@ export const DelayComponent: FC<{
   );
 
   const getCurrentDelayLabel = () => {
-    if (!currentDelay) return null;
+    if (!currentDelay) return 'Immediately';
     const option = delayOptions.find((opt) => opt.value === currentDelay);
     return option?.label || `${currentDelay} min`;
   };
@@ -89,13 +94,13 @@ export const DelayComponent: FC<{
         }
         className={clsx(
           'cursor-pointer flex items-center gap-[4px]',
-          currentDelay > 0 && 'bg-[#D82D7E] text-white rounded-full'
+          currentDelay !== 0 && 'bg-[#D82D7E] text-white rounded-full'
         )}
       >
         <DelayIcon />
       </div>
       {isOpen && (
-        <div className="z-[300] absolute end-0 top-[100%] w-[200px] bg-newBgColorInner p-[8px] menu-shadow translate-y-[10px] flex flex-col rounded-[8px]">
+        <div className="z-[300] absolute end-0 top-[100%] w-[270px] bg-newBgColorInner p-[8px] menu-shadow translate-y-[10px] flex flex-col rounded-[8px]">
           <div className="grid grid-cols-4 gap-[4px]">
             {delayOptions.map((option) => (
               <div
@@ -103,6 +108,7 @@ export const DelayComponent: FC<{
                 key={option.value}
                 className={clsx(
                   'h-[32px] flex items-center justify-center rounded-[4px] cursor-pointer hover:bg-newBgColor text-[13px]',
+                  option.value <= 0 && 'col-span-2',
                   currentDelay === option.value && 'bg-[#612BD3] text-white hover:bg-[#612BD3]'
                 )}
               >
@@ -139,7 +145,7 @@ export const DelayComponent: FC<{
               </button>
             </div>
           </div>
-          {currentDelay > 0 && (
+          {!!currentDelay && (
             <button
               onClick={() => handleSelectDelay(0)}
               className="mt-[8px] h-[32px] w-full rounded-[4px] text-[13px] text-red-400 hover:bg-red-400/10"

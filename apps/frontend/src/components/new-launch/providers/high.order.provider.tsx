@@ -19,6 +19,7 @@ import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import useSWR from 'swr';
 import { InternalChannels } from '@gitroom/frontend/components/launches/internal.channels';
+import { DEFAULT_SCHEDULED_DELAY } from '@gitroom/helpers/utils/scheduled.delay';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import SafeImage from '@gitroom/react/helpers/safe.image';
@@ -240,7 +241,7 @@ export const withProvider = function <T extends object>(params: {
             form.setValue(prefix + 'mode', 'quote', { shouldDirty: true });
             form.setValue(prefix + 'active', true, { shouldDirty: true });
             if (form.getValues(prefix + 'delay') == null) {
-              form.setValue(prefix + 'delay', delay ?? '0', { shouldDirty: true });
+              form.setValue(prefix + 'delay', delay ?? String(DEFAULT_SCHEDULED_DELAY), { shouldDirty: true });
             }
           }
         },

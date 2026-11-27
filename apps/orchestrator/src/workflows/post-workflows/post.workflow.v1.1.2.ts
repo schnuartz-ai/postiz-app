@@ -7,7 +7,10 @@ import {
   sleep,
   defineSignal,
   setHandler,
+  patched,
 } from '@temporalio/workflow';
+import { resolveScheduledDelay, MINUTE_MS } from '@gitroom/helpers/utils/scheduled.delay';
+import { runScheduledActions } from '@gitroom/helpers/utils/run.scheduled.actions';
 import dayjs from 'dayjs';
 import { Integration } from '@prisma/client';
 import { capitalize, sortBy } from 'lodash';
@@ -421,8 +424,42 @@ export async function postWorkflowV112({
     return false;
   };
 
+  // Temporal patch preserves existing workflow history. The workflow's
+  // Math.random is replay-safe; a delay is sampled only once per comment.
+  const scheduledDelayV1 = patched('scheduled-delays-v1');
+  let internalWork: Promise<void> | undefined;
+  const { processInternalPlug: runInternalPlug } = proxyActivities<PostActivity>({
+    startToCloseTimeout: '10 minute',
+    taskQueue,
+    retry: { maximumAttempts: 1 },
+  });
+  const runInternalActions = async () => {
+    const started = Date.now();
+    const actions = await internalPlugs(post.integration, JSON.parse(post.settings));
+    await runScheduledActions(actions, sleep, async (todo) => {
+      for (const _ of iterate) {
+        try {
+          await runInternalPlug({ ...todo, post: postsResults[0].postId });
+          return;
+        } catch (err) {
+          const handle = await handleActivityError(err, () => getIntegrationById(organizationId, todo.integration));
+          if (handle.type === 'retry') continue;
+          break;
+        }
+      }
+      await inAppNotification(post.organizationId, 'Scheduled engagement failed',
+        'A scheduled repost or comment could not be confirmed. Check the target account before retrying.',
+        true, false, 'fail').catch(() => undefined);
+    }, () => Date.now() - started);
+  };
+
+  try {
   // iterate over the posts
   for (let i = 0; i < postsList.length; i++) {
+    if (scheduledDelayV1 && i > 0) {
+      const delay = resolveScheduledDelay(postsList[i].delay, MINUTE_MS);
+      if (delay > 0) await sleep(delay);
+    }
     const before = postsResults.length;
     // once the platform accepted the post, the catch below must never retry
     // the publish - retrying after updatePost / notification errors would
@@ -446,7 +483,7 @@ export async function postWorkflowV112({
 
           // then post the comments if any
         } else {
-          if (postsList[i].delay) {
+          if (!scheduledDelayV1 && postsList[i].delay) {
             await sleep(60000 * Math.max(0, Number(postsList[i].delay ?? 0)));
           }
 
@@ -499,6 +536,13 @@ export async function postWorkflowV112({
         updated = true;
 
         if (i === 0) {
+          if (scheduledDelayV1) {
+            // Start the independent action timers as soon as the root is live.
+            // A delayed thread reply must not delay a scheduled repost/comment.
+            internalWork = runInternalActions().catch(async () => {
+              await inAppNotification(post.organizationId, 'Scheduled engagement failed', 'A scheduled repost or comment could not be completed.', true, false, 'fail').catch(() => undefined);
+            });
+          }
           // send notification on a sucessful post
           await inAppNotification(
             post.integration.organizationId,
@@ -600,7 +644,7 @@ export async function postWorkflowV112({
   );
 
   // load internal plugs like repost by other users
-  const internalPlugsList = await internalPlugs(
+  const internalPlugsList = scheduledDelayV1 ? [] : await internalPlugs(
     post.integration,
     JSON.parse(post.settings)
   );
@@ -724,5 +768,8 @@ export async function postWorkflowV112({
         ]),
       });
     }
+  }
+  } finally {
+    if (internalWork) await internalWork;
   }
 }
