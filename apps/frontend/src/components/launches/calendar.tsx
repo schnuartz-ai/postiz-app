@@ -539,7 +539,7 @@ const sameSelection = (a: Set<string>, b: Set<string>) =>
   a.size === b.size && Array.from(a).every((id) => b.has(id));
 
 export const WeekView = () => {
-  const { startDate, selectedChannels, integrations } = useCalendar();
+  const { startDate, endDate, customer, selectedChannels } = useCalendar();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const moving = useRef(false);
   const grid = useRef<HTMLDivElement>(null);
@@ -563,7 +563,7 @@ export const WeekView = () => {
     setSelected(new Set());
     gesture.current = null;
     setBox(null);
-  }, [startDate, selectedChannels, integrations]);
+  }, [startDate, endDate, customer, selectedChannels]);
 
   const updateSelection = useCallback(() => {
     const el = grid.current;
@@ -609,12 +609,17 @@ export const WeekView = () => {
       else if (g.clientY > r.bottom - 30) el.scrollTop += 12;
       if (g.clientX < r.left + 30) el.scrollLeft -= 12;
       else if (g.clientX > r.right - 30) el.scrollLeft += 12;
-      updateSelection();
       frame = requestAnimationFrame(autoScroll);
     };
     const move = (event: PointerEvent) => {
       const g = gesture.current;
       if (!g || event.pointerId !== g.pointerId) return;
+      if (!(event.buttons & 1)) {
+        gesture.current = null;
+        cancelAnimationFrame(frame);
+        setBox(null);
+        return;
+      }
       g.clientX = event.clientX;
       g.clientY = event.clientY;
       if (!g.active) {
@@ -714,10 +719,11 @@ export const WeekView = () => {
 
   return (
     <WeekSelectionContext.Provider value={selection}>
-    <div className="flex flex-col text-textColor flex-1">
+      <div className="flex flex-col text-textColor flex-1">
       <div className="flex-1 relative">
         <div
           ref={grid}
+          onScroll={updateSelection}
           onPointerDownCapture={startSelection}
           onClickCapture={(event) => {
             if (skipClick.current && event.detail !== 0) {
@@ -780,7 +786,7 @@ export const WeekView = () => {
         />,
         document.body
       )}
-    </div>
+      </div>
     </WeekSelectionContext.Provider>
   );
 };
@@ -1065,7 +1071,7 @@ export const CalendarColumn: FC<{
               fetch(`/posts/${move.id}/date`, {
                 method: 'PUT',
                 body: JSON.stringify({
-                  date: move.date.utc().format('YYYY-MM-DDTHH:mm:ss'),
+                  date: move.date.toISOString(),
                   action: 'schedule',
                 }),
               }),
@@ -1181,7 +1187,7 @@ export const CalendarColumn: FC<{
       }
     },
     collect: (monitor) => ({
-      canDrop: isBeforeNow ? false : !!monitor.canDrop() && !!monitor.isOver(),
+      canDrop: !isBeforeNow && monitor.isOver() && monitor.canDrop(),
     }),
   }), [posts, isBeforeNow, getDate, selection, startDate, endDate, display, fetch, toaster, t, reloadCalendarView, changeDate, modal]);
 
